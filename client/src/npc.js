@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { captureRig, poseStand, poseSit } from './rig.js';
+import { bakeTexture } from './model.js';
 
 const BODIES = ['man', 'woman', 'elder', 'baby'];
 const url = (b) => `/models/people/${b}-lite.glb`;
@@ -23,6 +24,38 @@ const mats = new Map();
 // Skin tints multiplied onto the base texture (light to dark). Weighted towards the tones of the cities in the game.
 const TINTS = [[1, 1, 1], [0.96, 0.88, 0.8], [0.88, 0.74, 0.62], [0.78, 0.62, 0.5], [0.68, 0.52, 0.41], [0.58, 0.44, 0.35]];
 const TINT_W = [0.04, 0.1, 0.2, 0.3, 0.25, 0.11];
+
+// Everyday outfits, using the same colours as the Boutique's clothes (cheaper pieces are common, Designer and Couture are rare).
+// Keep in sync with CLOTHES_TABLE in server/fashion.js. [colour, weight]
+const TOPS = [['#e8e8e8', 8], ['#e07a1f', 6], ['#2f6bb3', 6], ['#cfd8e3', 5], ['#e9dcc3', 3], ['#7a5a45', 3], ['#1f2a44', 1.5], ['#1a1a1a', 1.5], ['#f4efe1', 0.6], ['#7b1e3a', 0.6]];
+const BOTTOMS = [['#556070', 5], ['#2d4a7a', 9], ['#b59b6c', 6], ['#33384a', 5], ['#d7cbb0', 3], ['#1d2b4d', 1.5], ['#15181f', 1.5], ['#e9dcc3', 0.6]];
+const SHOES = [['#444444', 6], ['#e8e8e8', 7], ['#5a3b26', 4], ['#3a2a20', 3], ['#f2f2f2', 2], ['#2b1a12', 1], ['#fafafa', 1], ['#3b2a1f', 0.4]];
+const SKIN_IDX = [0, 2, 3, 5, 7, 9];   // the six NPC tones as model.js skin tones
+const wpick = (list, h) => { let tot = 0; for (const [, w] of list) tot += w; let r = (h % 10007) / 10007 * tot; for (const [c, w] of list) { if (r < w) return c; r -= w; } return list[0][0]; };
+const dressQueue = [];
+let smallSrc = {}, dressTimer = 0;
+// Called once per frame by the owner (or from moveNpc): bakes one outfit at a time so loading the street never freezes.
+export function processNpcDress(budget = 1) {
+  while (budget-- > 0 && dressQueue.length) {
+    const g = dressQueue.shift(), N = g.userData.npc; if (!N || !N.wantCloth) continue;
+    const { body, skin, cloth } = N.wantCloth;
+    N.root.traverse((o) => {
+      if (!o.isMesh || !o.material) return;
+      if (!o.userData.npcSrc) o.userData.npcSrc = o.material.map;
+      const src = o.userData.npcSrc; if (!src || !src.image) return;
+      let small = smallSrc[body];
+      if (!small) {   // half-size copy of the texture: faster to bake, and NPCs are never seen up close
+        const cv = document.createElement('canvas'); const W = Math.min(512, src.image.width || 512); cv.width = W; cv.height = W;
+        cv.getContext('2d').drawImage(src.image, 0, 0, W, W);
+        small = smallSrc[body] = Object.assign(src.clone(), { image: cv });
+      }
+      const m = o.material.clone(); m.color = new THREE.Color(1, 1, 1);
+      m.map = bakeTexture(body, { skin, hair: 'brown', eyes: 'brown', style: 'original' }, small, cloth, 'npc:');
+      m.needsUpdate = true; o.material = m;
+    });
+    N.wantCloth = null;
+  }
+}
 
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 const pick = (h, w) => { let r = (h % 1000) / 1000, i = 0; for (; i < w.length - 1; i++) { if (r < w[i]) break; r -= w[i]; } return i; };
@@ -92,7 +125,16 @@ export function upgradeToNpc(group, look = {}) {
     });
   }
   const rig = worker && !WORKERS[worker] ? null : captureRig(root);   // still figures have no skeleton to pose
-  group.userData.npc = { root, mixer, action, rig, bones: rig ? rig.bones : {}, b: 1, phase: Math.random() * 6, seated: false, body };
+  let wantCloth = null;
+  if (!worker && (body === 'man' || body === 'woman')) {
+    const tone = SKIN_IDX[tint] || 0;
+    wantCloth = { body, skin: tone, cloth: { top: wpick(TOPS, h >>> 1), bottom: wpick(BOTTOMS, h >>> 5), shoes: wpick(SHOES, h >>> 9) } };
+  }
+  group.userData.npc = { wantCloth, root, mixer, action, rig, bones: rig ? rig.bones : {}, b: 1, phase: Math.random() * 6, seated: false, body };
+  if (wantCloth) {
+    dressQueue.push(group);
+    if (!dressTimer) dressTimer = setInterval(() => { processNpcDress(1); if (!dressQueue.length) { clearInterval(dressTimer); dressTimer = 0; } }, 30);
+  }
 }
 
 // Every frame: walk when moving (speed in m/s), stand when not.

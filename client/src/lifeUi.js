@@ -92,7 +92,7 @@ export function initLife(socket) {
     for (const j of jobs.list) {
       if (!jobRows.has(j.id)) buildJob(j);
       const r = jobRows.get(j.id);
-      const mine = jobs.current === j.id || jobs.current2 === j.id;
+      const mine = jobs.current === j.id || jobs.current2 === j.id || jobs.current3 === j.id;
       r.pay.textContent = `₦${fmt(j.pay)} / shift`;
       r.where.textContent = `${j.part ? 'Part-time · ' : ''}${j.where} · Needs: ${j.req}`;
       r.perk.textContent = j.perk ? `Skill perk: ${j.perk}` : '';
@@ -104,6 +104,7 @@ export function initLife(socket) {
     }
     $('quitJob').hidden = !jobs.current;
     $('quitJob2').hidden = !jobs.current2;
+    $('quitJob3').hidden = !jobs.current3;
   }
   socket.on('jobs', (j) => {
     jobs = j;
@@ -111,6 +112,7 @@ export function initLife(socket) {
   });
   $('quitJob').addEventListener('click', () => socket.emit('quitJob', 'main'));
   $('quitJob2').addEventListener('click', () => socket.emit('quitJob', 'part'));
+  $('quitJob3').addEventListener('click', () => socket.emit('quitJob', 'extra'));
 
   // ----- Buttons and panels -----
   function toggle(panelId) {

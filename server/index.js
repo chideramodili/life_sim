@@ -18,9 +18,12 @@ import { phaseAt, stateOf, junctionAt, axisOfHeading } from './signals.js';
 import { VEH, newDrive, stepSpeed, moveDrive, POLICE, newChase, chaseTick, lineOfSight } from './driving.js';
 import { SPEED_LIMIT, PATROL_SEE, CHECK_REACH, CHECK_CHANCE, CHECK_COOLDOWN_MS, checkpointsOf, OFFENCES, STEAL, ARREST_JAIL_SEC, PATROL_EVERY_MS, PATROL_CHANCE, cleanFines, newFine, fineView, totalDue, overdueTotal, payFine, payOldestFirst, stealOutcome, wantedByPolice } from './police.js';
 import { getCity, CITY, DOOR_REACH, routeBetween, pointOnRoute } from './city.js';
+import { planFor, stepWork } from './workstyle.js';
+import { restoreBackup, startBackups, finalBackup } from './backup.js';
 import { speedFor, slide, findPath, roomBlockedFn, roomSolids } from './movement.js';
 import { MOVE_FEE, CITIES, CITY_IDS, DEFAULT_CITY, isCity, parseCity, TICKETS, TICKET_IDS, ticketQuote, distanceBetween, HIGHWAY, neighbour, gateAt, arrivalFrom } from './cities.js';
 import { MAX_LOTS, SELL_LAND, BIZ_MAX_LEVEL, UPGRADE_COST, STOCK_CAP, KINDS, KIND_IDS, isKind, priceOf, validName, isOpen as bizOpenNow, newBiz, step as bizStep, buyStock, payStaff, hire as bizHire, STAFF_WAGE, STAFF_MAX, STAFF_BOOST, HIRE_FEE } from './business.js';
+import { LAPTOPS, LAPTOP_IDS, parseLaptop, laptopTier, buyLaptop, laptopWhy } from './laptops.js';
 import { PHONES, PHONE_IDS, parsePhones, serializePhones, buyPhone, usePhone, hasCamera } from './phones.js';
 import { newChess, chessMove, chessStatus, legalMoves, newTwentyOne, twentyOneAct, handValue, newWordRace, wordGuess, GAME_KINDS, WORD_ROUNDS } from './games.js';
 import { MAX_FRIENDS, MAX_REQUESTS_OUT, DM_KEEP, DM_SHOW, PHONE_RE, NAME_RE, newPhone, phoneText, checkTransfer, transferLimits } from './friends.js';
@@ -105,6 +108,8 @@ const ROOMS = {
   pharmacy: { name: 'Pharmacy',  color: '#2d5a63', accent: '#8be0b0', cap: 10, hours: { open: 8, close: 21 } },
   garage: { name: 'Kanis Motors',  color: '#454552', accent: '#ff9f1c', cap: 10, hours: { open: 8, close: 19 } },
   club:   { name: 'Night Club',  color: '#2a1050', accent: '#c77dff', cap: 20, hours: { open: 20, close: 5 } },
+  hotel:  { name: 'Grand Hotel', color: '#5a3b2e', accent: '#ffb347', cap: 20, hours: null },
+  eventcenter: { name: 'Event Centre', color: '#2b3a67', accent: '#7ae0ff', cap: 30, hours: { open: 10, close: 23 } },
   bank:   { name: 'Bank',        color: '#27493f', accent: '#f4d35e', cap: 10, hours: { open: 8, close: 18 } },
   boutique: { name: 'Boutique',  color: '#4a2f55', accent: '#ff7eb6', cap: 12, hours: { open: 10, close: 20 } },
   homestore: { name: 'Home Store', color: '#5a4a2f', accent: '#ff9f1c', cap: 12, hours: { open: 9, close: 19 } },
@@ -165,6 +170,9 @@ const ACTIONS = {
   toilet: { need: 'toilet', label: 'Go',     cost: 0,   gain: 60 },
   // Only works in one room. The game shows this button instead of Play while you are there.
   dance:  { need: 'fun',    label: 'Dance',  cost: 1000, gain: 50, onlyRoom: 'club' },
+  // The Grand Hotel: a paid night away from home. The Event Centre: a ticket to whatever is on tonight.
+  hotelsleep: { need: 'energy', label: 'Book a night', cost: 8000, gain: 65, onlyRoom: 'hotel' },
+  event:  { need: 'fun',    label: 'Attend event', cost: 3000, gain: 60, onlyRoom: 'eventcenter' },
 };
 const GUEST_SLEEP_GAIN = 55;  // sleeping over at a friend's house (better than a bench, worse than your own bed)
 const HOME_SLEEP_GAIN = 70;   // sleeping in your own bed (power on)
@@ -214,10 +222,11 @@ const STORY_TICK_MS = Number(process.env.STORY_TICK_MS) || 1000;
 // Your job is the one you took at the Jobs Center. Story jobs (from Chapter 1) and skill jobs are listed in skills.js.
 // Players saved before the Jobs Center board existed keep the job their story result gave them.
 const jobOf = (p) => jobById(p.jobId);
-// Two job slots: one main job and one part-time job. Each has its own shift cooldown and shift count.
+// Three job slots: one main job and two part-time jobs ('part' and 'extra'). Each has its own shift cooldown and shift count.
 const SLOTS = {
   main: { id: 'jobId', last: 'lastWork', shifts: 'shiftsOnJob', taken: 'jobTakenAt' },
   part: { id: 'job2Id', last: 'lastWork2', shifts: 'shiftsOnJob2', taken: 'jobTakenAt2' },
+  extra: { id: 'job3Id', last: 'lastWork3', shifts: 'shiftsOnJob3', taken: 'jobTakenAt3' },
 };
 const slotJob = (p, slot) => jobById(p[SLOTS[slot].id]);
 const eventMult = () => (world.event && world.event.payMult) || 1;
@@ -226,10 +235,11 @@ const payFor = (p, job) => Math.round(job.pay * eventMult() * payBonus(p.rep) * 
 // How long a shift takes. SHIFT_SCALE=0 makes shifts instant (used by the old tests).
 const SHIFT_SCALE = process.env.SHIFT_SCALE !== undefined ? Number(process.env.SHIFT_SCALE) : 1;
 // While you are on a shift you stay where you are: these requests are refused until it is over or you cancel it.
-const SHIFT_LOCKED = new Set(['moveTo', 'act', 'study', 'applyJob', 'quitJob', 'buyMedicine', 'buyVehicle', 'travel', 'enter', 'goOutside', 'drive', 'driveInput', 'visit', 'train', 'steal']);
+const SHIFT_LOCKED = new Set(['moveTo', 'act', 'study', 'applyJob', 'quitJob', 'buyMedicine', 'laptopBuy', 'buyVehicle', 'travel', 'enter', 'goOutside', 'drive', 'driveInput', 'visit', 'train', 'steal']);
 
 // ---------- Database ----------
 fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+await restoreBackup(DB_FILE);   // on a host that wipes its disk: bring the last copy back from MongoDB first
 const db = new DatabaseSync(DB_FILE);
 db.exec(`
   PRAGMA journal_mode = WAL;
@@ -352,6 +362,10 @@ addColumn('rep', 'REAL NOT NULL DEFAULT 0');
 addColumn('job_id', 'TEXT');
 addColumn('job2_id', 'TEXT');
 addColumn('handsets', 'TEXT');
+addColumn('laptop', 'TEXT');
+addColumn('job3_id', 'TEXT');
+addColumn('job_city', 'TEXT');
+addColumn('last_work3', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('city', 'TEXT');
 addColumn('home_city', 'TEXT');
 addColumn('last_work2', 'INTEGER NOT NULL DEFAULT 0');
@@ -388,6 +402,7 @@ const q = {
   lookDone: db.prepare('UPDATE users SET look_done = 1 WHERE id = ?'),
   setLook: db.prepare('UPDATE users SET body = ?, eyes = ?, skin = ?, hair = ?, style = ?, face = ? WHERE id = ?'),
   insertUser: db.prepare('INSERT INTO users (username, pass_hash, recovery_hash, cash, food, room, created_at, last_seen, phone, start_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  saveExtra: db.prepare('UPDATE users SET laptop = ?, job3_id = ?, last_work3 = ?, job_city = ? WHERE id = ?'),
   saveUser: db.prepare('UPDATE users SET cash = ?, food = ?, energy = ?, fun = ?, social = ?, clean = ?, toilet = ?, room = ?, story = ?, last_work = ?, bills = ?, skills = ?, job_id = ?, job2_id = ?, last_work2 = ?, handsets = ?, city = ?, home_city = ?, stress = ?, sick = ?, burnout = ?, vehicles = ?, net = ?, rep = ?, bank = ?, home = ?, wardrobe = ?, fines = ?, jail_until = ?, last_seen = ? WHERE id = ?'),
   addLedger: db.prepare('INSERT INTO ledger (user_id, kind, bal, cash, bal_after, cash_after, note, game_min, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   pruneLedger: db.prepare('DELETE FROM ledger WHERE user_id = ? AND id NOT IN (SELECT id FROM ledger WHERE user_id = ? ORDER BY id DESC LIMIT 300)'),
@@ -872,6 +887,8 @@ function roomInfo(id, p = null) {
     info.names = Object.fromEntries(Object.keys(ctx.layout.doors).map((k) => [k, ROOMS[k].name]));
     info.accents = Object.fromEntries(Object.keys(ctx.layout.doors).map((k) => [k, ROOMS[k].accent]));
     info.myPlot = p && ctx.id === p.homeCity ? plotOf(p).id : -1;
+    const vv = p ? visitVenues(p) : null;
+    info.visit = vv ? [...vv] : null;
   } else if (id === 'biz') {
     info.exit = INSIDE_EXIT;
     const rec = p ? LOTS[p.city].get(p.bizLot) : null;
@@ -891,7 +908,7 @@ function snapshot(key) {
       const look = publicLook(p.wardrobe);
       const o = look ? { id: p.id, name: p.name, x: p.x, z: p.z, color: p.color, look } : { id: p.id, name: p.name, x: p.x, z: p.z, color: p.color };
       if (p.riding) { o.ride = p.riding; o.ry = p.ry || 0; if (p.drive) { const vm = VEHICLES[activeVehicle(p, p.drive.kind)]; if (vm && vm.model) o.rm = vm.model; } }
-      if (p.shift) o.work = 1;
+      if (p.shift) { o.work = p.shift.plan ? p.shift.plan.style : 1; if (p.shift.plan && p.shift.at) o.wf = Math.round(p.face * 100) / 100; }
       if (p.sit) o.sit = 1;
       if (p.lying) o.lie = 1;
       if (p.anim && p.anim.until > Date.now()) o.an = p.anim.k;
@@ -1016,6 +1033,7 @@ function whyNotStudy(p, skill, mode) {
   if (p.sick) return 'You are sick';
   if (p.burnout) return 'You are burned out. Rest first.';
   if (p.skills[skill] >= xpForMax) return 'Maxed out';
+  if (skill === 'coding' && !p.laptop) return 'You need a laptop first. Buy one at the Shop';
   if (p.room !== rule.room) return `Go to the ${ROOMS[rule.room].name}`;
   if (!venueOpen(rule.room)) return `${ROOMS[rule.room].name} is closed`;
   const cons = consequences(p.bills);
@@ -1043,15 +1061,51 @@ function phonesInfo(p) {
   return {
     here: p.room === 'shop' && venueOpen('shop'),
     active: p.handsets.active,
-    list: PHONE_IDS.map((id) => ({ id, label: PHONES[id].label, cost: PHONES[id].cost, camera: PHONES[id].camera, color: PHONES[id].color, text: PHONES[id].text, owned: p.handsets.owned.includes(id) })),
+    list: PHONE_IDS.map((id) => ({ id, label: PHONES[id].label, brand: PHONES[id].brand, cost: PHONES[id].cost, camera: PHONES[id].camera, color: PHONES[id].color, text: PHONES[id].text, owned: p.handsets.owned.includes(id) })),
   };
 }
+function laptopsInfo(p) {
+  return {
+    here: p.room === 'shop' && venueOpen('shop'),
+    owned: p.laptop,
+    list: LAPTOP_IDS.map((id) => ({ id, label: LAPTOPS[id].label, tier: LAPTOPS[id].tier, color: LAPTOPS[id].color, text: LAPTOPS[id].text, cost: LAPTOPS[id].cost, price: Math.max(0, LAPTOPS[id].cost - (p.laptop ? Math.floor(LAPTOPS[p.laptop].cost / 2) : 0)), owned: p.laptop === id, better: laptopTier(p.laptop) < LAPTOPS[id].tier })),
+  };
+}
+const sendLaptops = (p) => p.socket.emit('laptops', laptopsInfo(p));
 const sendPhones = (p) => p.socket.emit('phones', phonesInfo(p));
+// Skill, story and laptop requirements together.
+function qualifyP(p, job) {
+  const q = qualifies(job, allFlags(p), p.skills, p.rep);
+  if (!q.ok) return q;
+  const w = laptopWhy(job, p.laptop);
+  return w ? { ok: false, why: w } : q;
+}
+// Where a new job goes: the main slot, or the first free part-time slot (null when both part-time slots are full).
+function slotFor(p, job) {
+  if (!job.part) return 'main';
+  if (!p.job2Id) return 'part';
+  if (!p.job3Id) return 'extra';
+  return null;
+}
+// Visiting another city: you may only enter a few public places, plus the workplace of a job you took in that city.
+// (Friends' houses and plots you own are handled separately.) At home in your own city you can enter everything.
+const VISITOR_VENUES = ['jobs', 'club', 'hotel', 'eventcenter', 'terminal', 'airport', 'hospital'];
+const jobCityOf = (p, slot) => p.jobCity[slot] || p.homeCity;
+function visitVenues(p) {
+  if (p.city === p.homeCity) return null;
+  const ok = new Set(VISITOR_VENUES);
+  for (const sl of ['main', 'part', 'extra']) {
+    const j = slotJob(p, sl);
+    if (j && !j.remote && jobCityOf(p, sl) === p.city) ok.add(j.room);
+  }
+  return ok;
+}
+const visitText = (p) => `You are only visiting ${CITIES[p.city].name}. You can go to the Jobs Center, the hotel, the Event Centre, the club and transport here, or to a workplace where you got a job.`;
 function jobSummary(p, slot, now) {
   const j = slotJob(p, slot);
   if (!j) return null;
   const perk = perkOf(j, p.skills);
-  return { title: j.title, pay: payFor(p, j), perk: perk.text, part: Boolean(j.part), room: j.room, open: venueOpen(j.room), hours: hoursText(ROOMS[j.room].hours), cooldownLeft: Math.max(0, Math.ceil((p[SLOTS[slot].last] + WORK_COOLDOWN_MS - now) / 1000)) };
+  return { cityId: jobCityOf(p, slot), cityName: CITIES[jobCityOf(p, slot)].name, title: j.title, pay: payFor(p, j), perk: perk.text, part: Boolean(j.part), room: j.room, open: venueOpen(j.room), hours: hoursText(ROOMS[j.room].hours), cooldownLeft: Math.max(0, Math.ceil((p[SLOTS[slot].last] + WORK_COOLDOWN_MS - now) / 1000)) };
 }
 function jobsInfo(p) {
   const mult = (world.event && world.event.payMult) || 1;
@@ -1059,11 +1113,12 @@ function jobsInfo(p) {
     here: p.room === 'jobs' && venueOpen('jobs'),
     current: p.jobId,
     current2: p.job2Id,
-    list: JOBS.filter((j) => !j.hidden || qualifies(j, allFlags(p), p.skills, p.rep).ok || (j.hidden && allFlags(p).includes(j.flag))).map((j) => {
-      const q = qualifies(j, allFlags(p), p.skills, p.rep);
+    current3: p.job3Id,
+    list: JOBS.filter((j) => !j.hidden || qualifyP(p, j).ok || (j.hidden && allFlags(p).includes(j.flag))).map((j) => {
+      const q = qualifyP(p, j);
       return {
         id: j.id, title: j.title, part: Boolean(j.part), perk: perkOf(j, p.skills).text, pay: payFor(p, j), where: j.remote ? 'Home (remote)' : ROOMS[j.room].name,
-        req: j.req ? `${SKILLS[j.req.skill].label} ${j.req.level}${j.ref && allFlags(p).includes(j.ref) ? ' (referral)' : ''}` : j.hidden ? 'Referral' : j.flag ? 'Story' : 'None',
+        req: (j.req ? `${SKILLS[j.req.skill].label} ${j.req.level}${j.ref && allFlags(p).includes(j.ref) ? ' (referral)' : ''}` : j.hidden ? 'Referral' : j.flag ? 'Story' : 'None') + (j.laptop ? ` + ${LAPTOPS[LAPTOP_IDS.find((id) => LAPTOPS[id].tier >= j.laptop)].label}+` : ''),
         qualified: q.ok, why: q.why,
       };
     }),
@@ -1340,6 +1395,7 @@ function save(p) {
   let room = p.trip ? p.trip.to : p.room; // a traveller is saved at their destination
   if (room === 'friendhome') room = 'street'; // a visitor wakes up outside next time
   q.saveUser.run(p.cash, round1(p.food), round1(p.energy), round1(p.fun), round1(p.social), round1(p.clean), round1(p.toilet), room, JSON.stringify(p.story), p.lastWork, JSON.stringify(p.bills), JSON.stringify(p.skills), p.jobId, p.job2Id, p.lastWork2 || 0, serializePhones(p.handsets), p.city, p.homeCity, round1(p.stress), p.sick ? 1 : 0, p.burnout ? 1 : 0, JSON.stringify(p.vehicles), JSON.stringify(p.net), round1(p.rep), JSON.stringify(p.bank), JSON.stringify(p.home), JSON.stringify(p.wardrobe), JSON.stringify(p.fines), p.jailUntil || 0, Date.now(), p.userId);
+  q.saveExtra.run(p.laptop, p.job3Id, p.lastWork3 || 0, JSON.stringify(p.jobCity || {}), p.userId);
 }
 function saveAll() {
   try {
@@ -1354,9 +1410,14 @@ function saveAll() {
   }
 }
 setInterval(saveAll, SAVE_EVERY_MS);
+startBackups(db, DB_FILE);
 
-function shutdown() {
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   saveAll();
+  await finalBackup(db, DB_FILE);
   db.close();
   process.exit(0);
 }
@@ -1415,6 +1476,7 @@ function startRide(p, method, mode, toId) {
   return true;
 }
 // The vehicle keeps to its route but slows and stops for a car in its way (it used to drive straight through traffic).
+const RIDE_LANE = { bus: 2.4, taxi: 2.2, car: 2.2, bike: 1.8 }; // metres to the side of the road centre
 const RIDE_HALF_LEN = { bus: 5, taxi: 2.1, car: 2.1, bike: 1 };
 function stepRide(p, now, dt) {
   const r = p.trip.ride;
@@ -1434,7 +1496,9 @@ function stepRide(p, now, dt) {
   if (r.s >= r.route.total) return finishRide(p, 'Arrived at ' + p.trip.label + '.');
   const s = r.s;
   const pt = pointOnRoute(r.route.points, s);
-  p.x = p.tx = pt.x; p.z = p.tz = pt.z; p.ry = pt.ry; p.riding = r.k;
+  // Keep to the lane the traffic uses on this road (same side as the cars going your way), clear of the railway pillars that stand in the middle of the road; ease in and out at both ends.
+  const off = (RIDE_LANE[r.k] || 2) * Math.min(1, s / 8, (r.route.total - s) / 8);
+  p.x = p.tx = pt.x + Math.cos(pt.ry) * off; p.z = p.tz = pt.z + Math.sin(pt.ry) * off; p.ry = pt.ry; p.riding = r.k;
 }
 function finishRide(p, text) {
   const r = p.trip.ride;
@@ -1766,6 +1830,7 @@ function exitBuilding(p) {
 function enterAuto(p, id) {
   const dest = ROOMS[id];
   if (id === HOME && p.city !== p.homeCity) { stopAuto(p, `Your home is in ${CITIES[p.homeCity].name}.`); return false; }
+  { const vv = visitVenues(p); if (vv && !vv.has(id)) { stopAuto(p, visitText(p)); return false; } }
   if (id === HOME && consequences(p.bills).locked) { stopAuto(p, 'Your landlord changed the lock. Pay your rent in Bills to get back in.'); return false; }
   if (!venueOpen(id)) { stopAuto(p, closedText(id)); return false; }
   if (!dest.solo && occupancy(id, p.city) >= dest.cap) { stopAuto(p, `${dest.name} is full right now.`); return false; }
@@ -1941,6 +2006,12 @@ io.on('connection', (socket) => {
     shiftsOnJob: 0,
     jobId: null,
     job2Id: null,
+    job3Id: null,
+    jobCity: (() => { try { const o = JSON.parse(saved.job_city || '{}'); const r = {}; for (const k of ['main', 'part', 'extra']) if (typeof o[k] === 'string' && Object.hasOwn(CITIES, o[k])) r[k] = o[k]; return r; } catch { return {}; } })(),
+    laptop: parseLaptop(saved.laptop),
+    lastWork3: saved.last_work3 || 0,
+    shiftsOnJob3: 0,
+    jobTakenAt3: 0,
     handsets: parsePhones(saved.handsets),
     lastWork2: saved.last_work2 || 0,
     shiftsOnJob2: 0,
@@ -1963,6 +2034,7 @@ io.on('connection', (socket) => {
   // An old save with a story job but no chosen job keeps the story job.
   p.jobId = jobById(saved.job_id) ? saved.job_id : (JOBS.find((j) => j.flag && !j.part && p.story.flags.includes(j.flag)) || {}).id || null;
   p.job2Id = jobById(saved.job2_id) && jobById(saved.job2_id).part ? saved.job2_id : null;
+  p.job3Id = jobById(saved.job3_id) && jobById(saved.job3_id).part && saved.job3_id !== p.job2Id ? saved.job3_id : null;
   // An older save may have a part-time job in the main slot: move it to the part-time slot.
   if (p.jobId && jobById(p.jobId).part) { if (!p.job2Id) p.job2Id = p.jobId; p.jobId = null; }
   // Everyone gets an in-game phone number (older accounts get theirs the first time they log in).
@@ -2116,10 +2188,15 @@ io.on('connection', (socket) => {
     p.lastAct[type] = now;
     p.cash -= a.cost;
     p[a.need] = Math.min(100, p[a.need] + gain);
-    const calm = type === 'sleep' && p.room === HOME && power ? STRESS.sleepHome : STRESS.actions[type];
+    const calm = (type === 'sleep' && p.room === HOME && power) || type === 'hotelsleep' ? STRESS.sleepHome : STRESS.actions[type];
     if (calm !== undefined) p.stress = clampStress(p.stress + calm);
     notice(p, `${a.label}: ${NEED_LABELS[a.need]} +${gain}.${extra}`);
     if (type === 'dance') questEvent(p, 'dance');
+    if (type === 'event') {
+      p.social = Math.min(100, p.social + 15);
+      const shows = ['Live concert', 'Comedy night', 'Fashion show', 'Gospel night', 'Tech meetup', 'Book launch'];
+      notice(p, `${shows[Math.floor(minuteOfDay() / 60) % shows.length]} tonight! Social +15.`);
+    }
   });
 
   // Request: save the player's look. Only known values are kept.
@@ -2212,16 +2289,16 @@ io.on('connection', (socket) => {
   socket.on('work', (req) => {
     if (p.shift) return notice(p, 'You are already on a shift.');
     if (p.trip) return notice(p, 'Wait until you arrive.');
-    let slot = req && typeof req === 'object' && (req.slot === 'part' || req.slot === 'main') ? req.slot : null;
+    let slot = req && typeof req === 'object' && (req.slot === 'part' || req.slot === 'main' || req.slot === 'extra') ? req.slot : null;
     if (!slot) {
-      const m = slotJob(p, 'main'), pt = slotJob(p, 'part');
-      slot = m && m.room === p.room ? 'main' : pt && pt.room === p.room ? 'part' : 'main';
+      slot = ['main', 'part', 'extra'].find((sl) => { const jb = slotJob(p, sl); return jb && jb.room === p.room && (jb.remote || jobCityOf(p, sl) === p.city); }) || 'main';
     }
     const S = SLOTS[slot];
     const job = slotJob(p, slot);
-    if (!job) return notice(p, slot === 'part' ? 'You do not have a part-time job. Visit the Jobs Center to take one.' : 'You do not have a job. Visit the Jobs Center to take one.');
+    if (!job) return notice(p, slot !== 'main' ? 'You do not have a part-time job. Visit the Jobs Center to take one.' : 'You do not have a job. Visit the Jobs Center to take one.');
     if (p.sick) return notice(p, 'You are sick and cannot work. Rest, or buy medicine at the Pharmacy.');
     if (p.burnout) return notice(p, 'You are burned out. Rest, relax, and sleep before working again.');
+    if (!job.remote && jobCityOf(p, slot) !== p.city) return notice(p, `This job is in ${CITIES[jobCityOf(p, slot)].name}. Travel there to work.`);
     if (p.room !== job.room) return notice(p, `Your shifts are at the ${ROOMS[job.room].name}.`);
     if (!venueOpen(job.room)) return notice(p, closedText(job.room));
     const now = Date.now();
@@ -2230,13 +2307,15 @@ io.on('connection', (socket) => {
     if (p.energy < WORK_MIN_ENERGY) return notice(p, 'Too tired to work. Get some sleep first.');
     if (job.hours && !IGNORE_HOURS && !isOpen(job.hours, minuteOfDay())) return notice(p, `This job only runs ${hoursText(job.hours)}.`);
     if (job.remote) {
+      const lw = laptopWhy(job, p.laptop);
+      if (lw) return notice(p, `${lw}. Buy one at the Shop.`);
       const cons = consequences(p.bills);
       if (cons.noPower) return notice(p, 'No power at home, so you cannot work. Pay your electricity.');
       if (cons.noData) return notice(p, 'You are out of data, so you cannot work online. Renew it in Bills.');
     }
     const ms = Math.round(shiftMs(job, perkOf(job, p.skills).level) * SHIFT_SCALE);
-    p.shift = { slot, jobId: job.id, room: job.room, start: now, end: now + ms };
-    p.tx = p.x; p.tz = p.z; // stand still
+    p.shift = { slot, jobId: job.id, room: job.room, start: now, end: now + ms, plan: planFor(job.id), i: 0, at: 0 };
+    p.tx = p.x; p.tz = p.z; // stand still (a job with a work routine walks to its first stop on the next tick)
     if (ms <= 0) return finishShift(p);
     notice(p, `Shift started: ${job.title}. About ${Math.ceil(ms / 1000)} seconds. You cannot leave until it is done.`);
   });
@@ -2282,11 +2361,11 @@ io.on('connection', (socket) => {
     if (p.trip) return notice(p, 'Wait until you arrive.');
     if (p.room !== 'jobs') return notice(p, 'Go to the Jobs Center to apply.');
     if (!venueOpen('jobs')) return notice(p, closedText('jobs'));
-    const S = SLOTS[job.part ? 'part' : 'main'];
-    if (p[S.id] === job.id) return notice(p, 'That is already your job.');
+    if (p.jobId === job.id || p.job2Id === job.id || p.job3Id === job.id) return notice(p, 'That is already your job.');
+    if (slotFor(p, job) === null) return notice(p, 'You already have two part-time jobs. Quit one first.');
     const now = Date.now();
     if (now - p.lastJobChange < 5000) return notice(p, 'Slow down a little.');
-    const q = qualifies(job, allFlags(p), p.skills, p.rep);
+    const q = qualifyP(p, job);
     if (!q.ok) return notice(p, `You do not qualify yet. ${q.why}.`);
     if (INTERVIEWS_ON && needsInterview(job)) {
       const wait = (p.interviewCool && p.interviewCool[job.id] || 0) + INTERVIEW.retryMs - now;
@@ -2299,12 +2378,15 @@ io.on('connection', (socket) => {
     takeJob(p, job);
   });
   function takeJob(p, job) {
-    const S = SLOTS[job.part ? 'part' : 'main'];
+    const sl = slotFor(p, job);
+    if (!sl) return notice(p, 'You already have two part-time jobs. Quit one first.');
+    const S = SLOTS[sl];
     p.lastJobChange = Date.now();
     p[S.id] = job.id;
+    p.jobCity[sl] = job.remote ? p.homeCity : p.city;
     p[S.taken] = Date.now();
     p[S.shifts] = 0;
-    notice(p, `You are now a ${job.title}${job.part ? ' (part-time)' : ''}. Shifts are at ${job.remote ? 'Home' : ROOMS[job.room].name}.`);
+    notice(p, `You are now a ${job.title}${job.part ? ' (part-time)' : ''}. Shifts are at ${job.remote ? 'Home' : `the ${ROOMS[job.room].name} in ${CITIES[p.jobCity[sl]].name}`}.`);
     sendJobs(p);
   }
   socket.on('interviewAnswer', (req) => {
@@ -2314,7 +2396,7 @@ io.on('connection', (socket) => {
     const job = jobById(iv.jobId);
     if (!job || Date.now() > iv.until) return notice(p, 'The interviewer has left. Apply again.');
     if (p.room !== 'jobs' || p.trip) return notice(p, 'You left the Jobs Center before the interview ended.');
-    const q = qualifies(job, allFlags(p), p.skills, p.rep);
+    const q = qualifyP(p, job);
     if (!q.ok) return notice(p, `You do not qualify any more. ${q.why}.`);
     const skill = job.req.skill, bonus = levelOf((p.skills && p.skills[skill]) || 0) >= (job.req.level || 0) + 2;
     const res = gradeInterview(iv.right, req.answers, bonus);
@@ -2330,13 +2412,14 @@ io.on('connection', (socket) => {
     socket.emit('interviewDone', { passed: res.passed });
   });
   socket.on('quitJob', (slotName) => {
-    const slot = slotName === 'part' ? 'part' : 'main';
+    const slot = slotName === 'part' || slotName === 'extra' ? slotName : 'main';
     const S = SLOTS[slot];
     if (!p[S.id]) return;
     // Walking out on a job you never even worked a shift at is ghosting. It costs you your name.
     const ghosted = p[S.shifts] === 0 && Date.now() - p[S.taken] < REP.ghostMs && p[S.taken] > 0;
     p[S.id] = null;
-    notice(p, slot === 'part' ? 'You quit your part-time job.' : 'You quit your job.');
+    delete p.jobCity[slot];
+    notice(p, slot !== 'main' ? 'You quit your part-time job.' : 'You quit your job.');
     if (ghosted) addRep(p, REP.ghost, 'you ghosted a job');
     sendJobs(p);
   });
@@ -2535,6 +2618,20 @@ io.on('connection', (socket) => {
     sendBiz(p, id);
   });
 
+  socket.on('laptopsOpen', () => sendLaptops(p));
+  socket.on('laptopBuy', (id) => {
+    if (typeof id !== 'string') return;
+    if (p.trip) return notice(p, 'Wait until you arrive.');
+    if (p.shift) return notice(p, 'Finish your shift first.');
+    if (p.room !== 'shop') return notice(p, 'Laptops are sold at the Shop.');
+    if (!venueOpen('shop')) return notice(p, closedText('shop'));
+    const r = buyLaptop(p.laptop, p.cash, id);
+    if (!r.ok) return notice(p, r.why);
+    p.cash -= r.cost;
+    p.laptop = r.laptop;
+    notice(p, `You bought a ${LAPTOPS[id].label}${r.trade ? ` (your old laptop was traded in for ₦${r.trade.toLocaleString('en-US')})` : ''}. You can now learn Coding.`);
+    sendLaptops(p); sendSkills(p); sendJobs(p);
+  });
   socket.on('phoneBuy', (id) => {
     if (typeof id !== 'string') return;
     if (p.trip) return notice(p, 'Wait until you arrive.');
@@ -2783,7 +2880,9 @@ io.on('connection', (socket) => {
       };
     }
     const own = p.city === p.homeCity ? plotOf(p).door : null;
-    socket.emit('cityPlan', { city: p.city, plan: ctx.planJson, home: own ? { x: own.x, z: own.z } : null });
+    const vv = visitVenues(p);
+    const plan = vv ? { ...ctx.planJson, doors: Object.fromEntries(Object.entries(ctx.planJson.doors).filter(([k]) => vv.has(k))) } : ctx.planJson;
+    socket.emit('cityPlan', { city: p.city, plan, home: own ? { x: own.x, z: own.z } : null });
   });
   socket.on('homeLights', (on) => {
     const why = homeGate(p, HOME);
@@ -2890,7 +2989,7 @@ io.on('connection', (socket) => {
     }
     if (t.rel) addRel(p, req.npc, t.rel);
     if (t.stress) p.stress = clampStress(p.stress + t.stress);
-    if (t.xp) {
+    if (t.xp && !(t.xp.skill === 'coding' && !p.laptop)) {
       addXp(p, t.xp.skill, t.xp.n);
       line += ` (+${t.xp.n} ${SKILLS[t.xp.skill].label} XP)`;
       sendSkills(p);
@@ -2993,6 +3092,8 @@ io.on('connection', (socket) => {
     if (p.trip || p.drive || p.room !== 'street' || typeof id !== 'string' || !isVenueDoor(id)) return;
     if (jailLeft(p)) return;
     if (id === HOME && p.city !== p.homeCity) return notice(p, `Your home is in ${CITIES[p.homeCity].name}.`);
+    const vv = visitVenues(p);
+    if (vv && !vv.has(id)) return notice(p, visitText(p));
     const d = doorFor(p, id);
     if (!d || Math.hypot(p.x - d.x, p.z - d.z) > DOOR_REACH) return notice(p, 'Walk up to the door first.');
     const dest = ROOMS[id];
@@ -3114,6 +3215,7 @@ io.on('connection', (socket) => {
     if (consequences(p.bills).locked) return notice(p, 'Pay your overdue rent before you move.');
     if (p.cash < MOVE_FEE) return notice(p, `Moving your home costs ₦${MOVE_FEE.toLocaleString('en-US')}.`);
     p.cash -= MOVE_FEE;
+    for (const sl of ['main', 'part', 'extra']) if (slotJob(p, sl) && !p.jobCity[sl]) p.jobCity[sl] = p.homeCity; // jobs stay where they were
     p.homeCity = p.city;
     q.setHomeCity.run(p.homeCity, p.userId);
     p.friendsSig = '';
@@ -3316,6 +3418,7 @@ setInterval(() => {
     if (!p.shift) continue;
     if (p.trip || p.room !== p.shift.room || p.sick || p.burnout || jailLeft(p)) cancelShift(p, 'Your shift was interrupted. No pay.');
     else if (now >= p.shift.end) finishShift(p);
+    else stepWork(p, now);
   }
   const walkers = {}, drivers = {}, copsOut = {};
   for (const id of CITY_IDS) { walkers[id] = []; drivers[id] = []; copsOut[id] = []; }
@@ -3441,7 +3544,8 @@ setInterval(() => {
   for (const p of players.values()) {
     if (p.room && ROOMS[p.room].solo) p.socket.emit('state', { room: p.room, players: snapshot(spaceOf(p)) });
     const locked = consequences(p.bills).locked;
-    const rooms = [...publicRoomsBy[p.city], { id: HOME, name: ROOMS[HOME].name, solo: true, open: !locked, locked, hours: locked ? 'Rent overdue' : 'Your place' }];
+    const vv = visitVenues(p);
+    const rooms = vv ? publicRoomsBy[p.city].filter((r) => vv.has(r.id)) : [...publicRoomsBy[p.city], { id: HOME, name: ROOMS[HOME].name, solo: true, open: !locked, locked, hours: locked ? 'Rent overdue' : 'Your place' }];
     p.socket.emit('me', {
       needs: needsOf(p),
       city: { id: p.city, name: CITIES[p.city].name },
@@ -3449,6 +3553,8 @@ setInterval(() => {
       handset: { id: p.handsets.active, label: PHONES[p.handsets.active].label, camera: hasCamera(p.handsets) },
       job: jobSummary(p, 'main', now),
       job2: jobSummary(p, 'part', now),
+      job3: jobSummary(p, 'extra', now),
+      laptop: p.laptop ? LAPTOPS[p.laptop].label : null,
       shift: p.shift ? { slot: p.shift.slot, left: Math.max(0, Math.ceil((p.shift.end - now) / 1000)), total: Math.max(1, Math.round((p.shift.end - p.shift.start) / 1000)) } : null,
       mood: mood(p),
       wellness: wellnessOf(p),

@@ -154,3 +154,80 @@ export function poseReach(rig, w) {
   turn(rig, 'RightArm', -1.25, 0, 0.1, w);
   turn(rig, 'RightForeArm', 0.35, 0, 0, w);
 }
+
+// Job poses (see server/workstyle.js). w = how much of the pose to use. Angles are from the rest pose, like the others above.
+// desk: writing on the counter; wash: wiping a car with a rag; mop: sweeping a mop; guard: hands clasped, looking around;
+// shelve: reaching up to a shelf; tray: carrying a tray at chest height.
+export function poseWork(rig, style, t, w) {
+  if (style === 'desk') {
+    turn(rig, 'RightArm', -1.05, 0, 0.3, w);
+    turn(rig, 'RightForeArm', 0.75 + Math.sin(t * 11) * 0.07, 0, 0, w);
+    turn(rig, 'RightHand', Math.sin(t * 9) * 0.15, 0, Math.sin(t * 7) * 0.12, w);
+    turn(rig, 'LeftArm', -0.9, 0, -0.35, w);
+    turn(rig, 'LeftForeArm', 0.55, 0, 0, w);
+    turn(rig, 'Spine', 0.12, 0, 0, w);
+    turn(rig, 'Neck', 0.3, 0, 0, w);
+    turn(rig, 'Head', 0.25, Math.sin(t * 0.7) * 0.08, 0, w);
+  } else if (style === 'wash') {
+    turn(rig, 'RightArm', -1.35 + Math.sin(t * 6) * 0.18, Math.cos(t * 6) * 0.28, 0.2, w);
+    turn(rig, 'RightForeArm', 0.7, 0, 0, w);
+    turn(rig, 'LeftArm', -0.35, 0, -0.55, w);
+    turn(rig, 'LeftForeArm', 0.7, 0, 0, w);
+    turn(rig, 'Spine', 0.22, Math.sin(t * 3) * 0.1, 0, w);
+    turn(rig, 'Head', 0.2, 0, 0, w);
+  } else if (style === 'mop') {
+    const sw = Math.sin(t * 3.2);
+    turn(rig, 'RightArm', -0.9, 0.35 * sw, 0.35, w);
+    turn(rig, 'LeftArm', -0.75, 0.35 * sw, -0.5, w);
+    turn(rig, 'RightForeArm', 0.7, 0, 0, w);
+    turn(rig, 'LeftForeArm', 0.75, 0, 0, w);
+    turn(rig, 'Spine', 0.2, 0.25 * sw, 0, w);
+    turn(rig, 'Head', 0.25, 0, 0, w);
+  } else if (style === 'guard') {
+    turn(rig, 'LeftArm', -0.45, 0, -0.55, w);
+    turn(rig, 'RightArm', -0.45, 0, 0.55, w);
+    turn(rig, 'LeftForeArm', 1.1, 0, 0, w);
+    turn(rig, 'RightForeArm', 1.1, 0, 0, w);
+    turn(rig, 'Head', 0, Math.sin(t * 0.6) * 0.5, 0, w);
+  } else if (style === 'shelve') {
+    const ph = Math.sin(t * 2.6) * 0.5 + 0.5;
+    turn(rig, 'RightArm', -1.6 - 0.3 * ph, 0, 0.15, w);
+    turn(rig, 'RightForeArm', 0.3, 0, 0, w);
+    turn(rig, 'Head', -0.15, 0, 0, w);
+  } else if (style === 'tray') {
+    turn(rig, 'RightArm', -0.5, 0, 0.5, w);
+    turn(rig, 'RightForeArm', 1.45, 0, 0, w);
+  } else if (style === 'carry') {          // a parcel held against the chest with both arms
+    turn(rig, 'LeftArm', -0.95, 0, -0.3, w); turn(rig, 'RightArm', -0.95, 0, 0.3, w);
+    turn(rig, 'LeftForeArm', 1.15, 0, 0, w); turn(rig, 'RightForeArm', 1.15, 0, 0, w);
+    turn(rig, 'Spine', -0.06 + Math.sin(t * 6) * 0.02, 0, 0, w);
+    turn(rig, 'Head', 0.05, 0, 0, w);
+  } else if (style === 'sell') {           // offering goods: one hand presents, the other tidies, head nods
+    const g = Math.sin(t * 1.9), h = Math.sin(t * 5);
+    turn(rig, 'RightArm', -1.15 + 0.15 * g, 0, 0.45, w);
+    turn(rig, 'RightForeArm', 0.7 + 0.3 * g, 0, 0, w);
+    turn(rig, 'RightHand', 0.3 * g, 0, 0, w);
+    turn(rig, 'LeftArm', -0.8 + 0.12 * h, 0, -0.35, w);
+    turn(rig, 'LeftForeArm', 0.9, 0, 0, w);
+    turn(rig, 'Spine', 0.1, 0, 0, w);
+    turn(rig, 'Head', 0.1 + 0.08 * Math.max(0, Math.sin(t * 1.1)), Math.sin(t * 0.8) * 0.15, 0, w);
+  } else if (style === 'coach') {          // clipboard in the left hand, the right hand points and counts
+    const g = Math.sin(t * 2.4);
+    turn(rig, 'LeftArm', -0.7, 0, -0.3, w); turn(rig, 'LeftForeArm', 1.5, 0, 0, w);
+    turn(rig, 'RightArm', -1.35 + 0.25 * g, 0, 0.35, w);
+    turn(rig, 'RightForeArm', 0.35 + 0.2 * g, 0, 0, w);
+    turn(rig, 'Head', 0.05, Math.sin(t * 0.7) * 0.35, 0, w);
+  } else if (style === 'mic') {            // microphone to the mouth, other arm up, swaying to the beat
+    const b = Math.sin(t * 5.2);
+    turn(rig, 'RightArm', -1.0, 0, 0.35, w); turn(rig, 'RightForeArm', 2.05, 0, 0, w);
+    turn(rig, 'LeftArm', 0, 0, 1.55 + 0.1 * b, w); turn(rig, 'LeftForeArm', 0.35 + 0.4 * b, 0, 0, w);
+    turn(rig, 'Spine', 0.03, 0.12 * Math.sin(t * 2.6), 0.05 * b, w);
+    turn(rig, 'Head', -0.08 + 0.06 * b, 0, 0, w);
+  } else if (style === 'type') {           // a laptop resting on the left forearm, typing with the right hand
+    turn(rig, 'LeftArm', -0.85, 0, -0.35, w); turn(rig, 'LeftForeArm', 1.35, 0, 0, w);
+    turn(rig, 'RightArm', -1.05, 0, 0.35, w);
+    turn(rig, 'RightForeArm', 1.05 + Math.sin(t * 13) * 0.08, 0, 0, w);
+    turn(rig, 'RightHand', Math.sin(t * 11) * 0.2, 0, Math.sin(t * 8) * 0.1, w);
+    turn(rig, 'Spine', 0.14, 0, 0, w); turn(rig, 'Head', 0.38, 0, 0, w);
+  }
+}

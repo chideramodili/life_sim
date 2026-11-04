@@ -61,15 +61,38 @@ function makeBoxVehicle(kind) {
     wheels(g, 0.85, 1.4, -1.4, 0.38);
     lights(g, 0.6, 2.22, -2.22, 0.9);
   } else if (kind === 'bike') {
-    const frame = mat(0x2a6fdb);
-    g.add(box(0.1, 0.1, 1.5, frame, 0, 0.7, 0));
-    g.add(box(0.1, 0.5, 0.1, frame, 0, 0.95, 0.5));
-    g.add(box(0.6, 0.06, 0.06, frame, 0, 1.2, 0.5));
-    for (const z of [0.7, -0.7]) {
-      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.08, 14), tyre);
-      c.rotation.z = Math.PI / 2;
-      c.position.set(0, 0.38, z);
-      g.add(c);
+    // a motorbike: two wheels, forks, tank, seat, handlebars and a rider with a helmet
+    const frame = mat(0x2a6fdb), dark = mat(0x222222), chrome = mat(0xb8bcc4);
+    for (const z of [0.75, -0.75]) {
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.16, 16), tyre);
+      c.rotation.z = Math.PI / 2; c.position.set(0, 0.38, z); g.add(c);
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.2, 10), chrome);
+      hub.rotation.z = Math.PI / 2; hub.position.set(0, 0.38, z); g.add(hub);
+    }
+    g.add(box(0.14, 0.14, 1.2, dark, 0, 0.55, 0));                 // engine / frame
+    g.add(box(0.3, 0.26, 0.6, frame, 0, 0.92, 0.28));              // tank
+    g.add(box(0.28, 0.1, 0.7, dark, 0, 0.9, -0.38));               // seat
+    g.add(box(0.5, 0.12, 0.3, frame, 0, 0.72, -0.8));              // rear mudguard
+    const fork = box(0.08, 0.8, 0.08, chrome, 0, 0.78, 0.7); fork.rotation.x = -0.3; g.add(fork);
+    g.add(box(0.7, 0.06, 0.06, dark, 0, 1.2, 0.58));               // handlebars
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), mat(0xfff2b0, { emissive: 0xfff2b0 })); lamp.position.set(0, 1.08, 0.82); g.add(lamp);
+    const skin = mat(0xb07850), shirt = mat(0xe9742c), jeans = mat(0x2c3e66), helmet = mat(0xf2f2f2);
+    const limb = (a, b, r, m) => {
+      const va = new THREE.Vector3(...a), vb = new THREE.Vector3(...b), len = va.distanceTo(vb);
+      const l = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 8), m);
+      l.position.copy(va).add(vb).multiplyScalar(0.5);
+      l.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), vb.clone().sub(va).normalize());
+      g.add(l);
+    };
+    const torso = box(0.42, 0.62, 0.24, shirt, 0, 1.45, -0.12); torso.rotation.x = 0.45; g.add(torso);
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), skin); head.position.set(0, 1.9, 0.1); g.add(head);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), helmet); cap.position.set(0, 1.93, 0.1); g.add(cap);
+    for (const s of [-1, 1]) {
+      limb([s * 0.22, 1.62, 0.0], [s * 0.27, 1.38, 0.28], 0.06, shirt);   // upper arm
+      limb([s * 0.27, 1.38, 0.28], [s * 0.3, 1.2, 0.58], 0.055, skin);    // forearm to the bars
+      limb([s * 0.13, 1.0, -0.3], [s * 0.15, 0.82, 0.12], 0.09, jeans);   // thigh
+      limb([s * 0.15, 0.82, 0.12], [s * 0.15, 0.5, -0.05], 0.075, jeans); // shin
+      g.add(box(0.1, 0.08, 0.26, dark, s * 0.15, 0.46, 0.02));            // foot
     }
   } else {
     // your own car
@@ -79,11 +102,6 @@ function makeBoxVehicle(kind) {
     g.add(box(1.5, 0.08, 2.2, body, 0, 1.78, -0.25));
     wheels(g, 0.85, 1.35, -1.35, 0.38);
     lights(g, 0.6, 2.17, -2.17, 0.9);
-  }
-  if (kind === 'bike') {
-    const rider = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.6, 4, 8), mat(0xe8b88a));
-    rider.position.set(0, 1.4, 0);
-    g.add(rider);
   }
   return g;
 }

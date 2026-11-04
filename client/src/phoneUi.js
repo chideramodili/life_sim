@@ -27,6 +27,8 @@ export function initPhones(socket) {
       const head = el('div', 'skillHead');
       const name = el('span', 'skillName', `${ph.label}${info.active === ph.id ? ' ✓ in use' : ''}`);
       name.style.color = ph.color;
+      const pic = el('span', 'phonePic'); pic.style.background = ph.color;   // a little phone in its colour
+      head.append(pic);
       head.append(name, el('span', 'tagc', ph.cost ? `₦${fmt(ph.cost)}` : 'Free'));
       row.append(head, el('div', 'billWho', `${ph.text}${ph.camera ? ' 📷' : ''}`));
       if (ph.owned) {

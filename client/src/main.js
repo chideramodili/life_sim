@@ -12,6 +12,8 @@ import { initSocial } from './socialUi.js';
 import { loadModel, whenModelReady, attachModel, animateModel, applyLook } from './model.js';
 import { openCreator } from './creator.js';
 import { loadNpc } from './npc.js';
+import { initRadio } from './radio.js';
+import { initLaptops } from './laptopUi.js';
 import { initPhones } from './phoneUi.js';
 import { initHud } from './hudUi.js';
 import { createMapUi, iconOf } from './mapUi.js';
@@ -52,6 +54,8 @@ const world = initWorld(socket);
 const life = initLife(socket);
 const social = initSocial(socket);
 const phonesUi = initPhones(socket);
+const radioUi = initRadio();
+const laptopsUi = initLaptops(socket);
 const intercityUi = initIntercity(socket);
 const bizUi = initBiz(socket);
 initInterview(socket);
@@ -347,6 +351,7 @@ socket.on('state', ({ room, players, cars, lvl, cops, ph }) => {
     a.group.userData.baseColor = p.color;
     dressAvatar(a.group, p.look, fashionCat);
     a.working = Boolean(p.work);
+    a.group.userData.work = typeof p.work === 'string' ? { style: p.work, face: p.wf != null ? p.wf : null } : null;
     a.sit = Boolean(p.sit);
     a.lying = Boolean(p.lie);
     a.exercise = p.an || 0;
@@ -402,7 +407,7 @@ loadModel();
 loadNpc();
 loadCar('police'); loadCar('taxi');
 if (location.search.includes('dumpSolids')) window.__interior = interior;
-if (location.search.includes('debug')) { window.__socket = socket; window.__three = { scene, camera, controls }; }
+if (location.search.includes('debug')) { window.__socket = socket; window.__three = { scene, camera, controls, renderer }; }
 
 // ---------- Police cars ----------
 const copCars = [];
@@ -492,11 +497,12 @@ function workLabel(job) {
       : `${job.part ? 'Work part-time' : 'Work a shift'} (₦${fmt(job.pay)})`;
 }
 function updateJob(m) {
-  const job = m.job, job2 = m.job2;
-  $('job').textContent = job && job2 ? `${job.title} + ${job2.title}` : job ? job.title : job2 ? `${job2.title} (part-time)` : 'None';
+  const job = m.job, job2 = m.job2, job3 = m.job3;
+  const titles = [job, job2, job3].filter(Boolean).map((j) => j.title);
+  $('job').textContent = titles.length === 1 ? (job ? job.title : `${titles[0]} (part-time)`) : titles.length ? titles.join(' + ') : 'None';
   const busy = Boolean(m.shift);
-  for (const [id, j, slot] of [['workBtn', job, 'main'], ['workBtn2', job2, 'part']]) {
-    const here = Boolean(j) && m.room === j.room && !busy;
+  for (const [id, j, slot] of [['workBtn', job, 'main'], ['workBtn2', job2, 'part'], ['workBtn3', job3, 'extra']]) {
+    const here = Boolean(j) && m.room === j.room && !busy && (j.room === 'home' || !j.cityId || !m.city || j.cityId === m.city.id);
     $(id).hidden = !here;
     if (here) {
       $(id).textContent = workLabel(j);
@@ -554,7 +560,7 @@ $('hudMore').addEventListener('click', () => {
   $('hudMore').textContent = compact ? 'More ▾' : 'Less ▴';
 });
 // Opening a panel on a phone tucks the info panel away, so nothing stacks on top of anything.
-for (const id of ['mapBtn', 'chatBtn', 'lookBtn', 'billsBtn', 'skillsBtn', 'jobsBtn', 'peopleBtn', 'carsBtn', 'phoneBtn', 'bankBtn', 'storeBtn', 'decoBtn', 'boutiqueBtn', 'wardrobeBtn', 'friendsBtn']) {
+for (const id of ['mapBtn', 'chatBtn', 'lookBtn', 'billsBtn', 'skillsBtn', 'jobsBtn', 'peopleBtn', 'carsBtn', 'phoneBtn', 'laptopBtn', 'bankBtn', 'storeBtn', 'decoBtn', 'boutiqueBtn', 'wardrobeBtn', 'friendsBtn']) {
   $(id).addEventListener('click', () => {
     if (window.matchMedia('(max-width: 600px)').matches) {
       hudEl.classList.add('compact');
@@ -737,6 +743,7 @@ function endSession(message) {
   life.reset();
   social.reset();
   phonesUi.reset();
+  laptopsUi.reset();
   bank.reset();
   homeUi.reset();
   fashionUi.reset();
@@ -1126,7 +1133,7 @@ function followMe(dt) {
   const f = 1 - Math.exp(-dt * 8); // same feel at any frame rate
   const me = avatars.get(myId);
   if (!roomInfoNow) return;
-  controls.enableRotate = !inHomeView();
+  controls.enableRotate = true;   // drag to spin the home freely; the rotate button still turns it a quarter
   if (homeSpin) {
     if (!inHomeView()) homeSpin = null;
     else {
@@ -1288,7 +1295,7 @@ renderer.setAnimationLoop(() => {
   applyDaylight();
   updateDoors(dt);
   interior.update(dt, world.daylight());
-  if (street) { street.setPeople([...avatars.values()].filter((a) => a.group.visible).map((a) => a.group.position)); street.update(dt); }
+  if (street) { street.setPeople([...avatars.values()].filter((a) => a.group.visible || a.veh).map((a) => (a.veh ? a.veh.position : a.group.position))); street.update(dt); }
   updateCops(dt, performance.now() / 1000);
   walkInput.update();
   if (cabin.active) {

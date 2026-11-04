@@ -151,6 +151,8 @@ export function createCity(info) {
   const city = info.city;
   const TINTS = (info.theme && info.theme.tints) || DEFAULT_TINTS;
   const GRASS = (info.theme && info.theme.grass) || '#587a40';
+  // Each city's own look: pavement, road and roof colours, how tall its towers are, and its landmarks (see server/cities.js).
+  const LOOK = { pave: '#a8a39a', road: '#3a3a3f', roof: '#8a3f30', parks: ['#4f8a3c', '#5f9a48', '#6aa44f'], hscale: {}, landmarks: [], ...((info.theme && info.theme.look) || {}) };
   const root = new THREE.Group();
   const disposables = [];
   const winMats = [];
@@ -166,13 +168,13 @@ export function createCity(info) {
   ground.position.y = -0.05;
   root.add(ground);
 
-  const asphalt = track(canvasTex(256, 256, (g, w, h) => speckle(g, w, h, '#3a3a3f', 30, 5000)));
+  const asphalt = track(canvasTex(256, 256, (g, w, h) => speckle(g, w, h, LOOK.road, 30, 5000)));
   asphalt.repeat.set(1, 1);
   const asphaltMat = (len) => { const t = asphalt.clone(); t.needsUpdate = true; t.repeat.set(len / 10, 1); disposables.push(t); return standard({ map: t, roughness: 0.95 }); };
   const lineTex = track(canvasTex(64, 8, (g, w, h) => { g.fillStyle = '#f2d34f'; g.fillRect(0, 0, w * 0.5, h); }));
   const lineMat = (len) => { const t = lineTex.clone(); t.needsUpdate = true; t.repeat.set(len / 5, 1); disposables.push(t); const m = new THREE.MeshBasicMaterial({ map: t, transparent: true }); disposables.push(m); return m; };
   const paving = track(canvasTex(128, 128, (g, w, h) => {
-    speckle(g, w, h, '#a8a39a', 22, 1800);
+    speckle(g, w, h, LOOK.pave, 22, 1800);
     g.strokeStyle = 'rgba(0,0,0,0.22)'; g.lineWidth = 2; g.strokeRect(0, 0, w, h);
     g.beginPath(); g.moveTo(w / 2, 0); g.lineTo(w / 2, h); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke();
   }));
@@ -206,9 +208,9 @@ export function createCity(info) {
   }
 
   // Parks, lawns and yards.
-  const parkMat = standard({ color: '#4f8a3c', roughness: 1 });
-  const lawnMat = standard({ color: '#5f9a48', roughness: 1 });
-  const yardMat = standard({ color: '#6aa44f', roughness: 1 });
+  const parkMat = standard({ color: LOOK.parks[0], roughness: 1 });
+  const lawnMat = standard({ color: LOOK.parks[1], roughness: 1 });
+  const yardMat = standard({ color: LOOK.parks[2], roughness: 1 });
   for (const pk of city.parks) {
     const m = plane(pk.x1 - pk.x0, pk.z1 - pk.z0, pk.kind === 'park' ? parkMat : pk.kind === 'lawn' ? lawnMat : yardMat, (pk.x0 + pk.x1) / 2, (pk.z0 + pk.z1) / 2, 0.03);
     m.renderOrder = 1;
@@ -220,13 +222,17 @@ export function createCity(info) {
   const gables = [];
   const stalls = [];
   const r = rnd(11);
-  for (const b of city.buildings) {
+  const domes = [];
+  for (const b0 of city.buildings) {
+    const hs = LOOK.hscale[b0.k];
+    const b = hs ? { ...b0, h: b0.h * hs } : b0;
     if (b.k === 'stall') { stalls.push(b); continue; }
     if (b.k === 'platform') { const g = new THREE.BoxGeometry(b.w, b.h, b.d); g.translate(b.x, b.h / 2, b.z); roofs.push({ g, c: '#8a8a90' }); continue; }
     if (!FACADES[b.k]) continue;
     const g = boxGeo(b.w, b.h, b.d, 12, 6);
     g.translate(b.x, b.h / 2, b.z);
     (byKind[b.k] = byKind[b.k] || []).push(g);
+    if (b.k === 'civic' && LOOK.landmarks.includes('domes') && Math.min(b.w, b.d) >= 12) domes.push(b);
     if (b.k === 'house') {
       const roof = gableGeo(b.w + 0.8, b.d + 0.8, 2.2);
       roof.rotateY(r() > 0.5 ? 0 : Math.PI / 2 * 0);
@@ -251,7 +257,7 @@ export function createCity(info) {
   const byColor = {};
   for (const rf of roofs) (byColor[rf.c] = byColor[rf.c] || []).push(rf.g);
   for (const [c, list] of Object.entries(byColor)) { root.add(new THREE.Mesh(mergeGeometries(list), standard({ color: c }))); for (const g of list) g.dispose(); }
-  if (gables.length) { const m = new THREE.Mesh(mergeGeometries(gables), standard({ color: '#8a3f30', side: THREE.DoubleSide })); root.add(m); for (const g of gables) g.dispose(); }
+  if (gables.length) { const m = new THREE.Mesh(mergeGeometries(gables), standard({ color: LOOK.roof, side: THREE.DoubleSide })); root.add(m); for (const g of gables) g.dispose(); }
   // Market stalls (small, coloured canopies).
   if (stalls.length) {
     const colors = ['#e74c3c', '#27ae60', '#f39c12', '#3a86ff', '#9b59b6'];
@@ -261,10 +267,68 @@ export function createCity(info) {
     stalls.forEach((b, i) => { const t = new THREE.Mesh(tops[i], standard({ color: colors[i % colors.length] })); root.add(t); });
   }
 
+  // ---------- Landmarks: what makes each city look like itself ----------
+  {
+    const flat = (c, extra = {}) => standard({ color: c, flatShading: true, roughness: 1, ...extra });
+    const add = (geo, mat, x, y, z, sx = 1, sy = 1, sz = 1, ry = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.rotation.y = ry; root.add(m); disposables.push(geo); return m; };
+    const lm = new Set(LOOK.landmarks);
+    if (lm.has('domes')) {   // white civic domes with a gold ring
+      for (const b of domes) {
+        const rad = Math.min(b.w, b.d) * 0.3;
+        add(new THREE.SphereGeometry(rad, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), standard({ color: '#f4f0e6', roughness: 0.5 }), b.x, b.h + 0.5, b.z);
+        add(new THREE.CylinderGeometry(rad * 1.04, rad * 1.04, 0.35, 24), standard({ color: '#d9b44a', metalness: 0.5, roughness: 0.35 }), b.x, b.h + 0.6, b.z);
+        add(new THREE.CylinderGeometry(0.1, 0.1, rad * 0.7, 6), standard({ color: '#d9b44a' }), b.x, b.h + 0.5 + rad + rad * 0.3, b.z);
+      }
+    }
+    if (lm.has('rock')) {    // a huge rock hill north of the city, with smaller outcrops
+      const rockM = flat('#8c8374');
+      add(new THREE.IcosahedronGeometry(1, 2), rockM, -30, 12, -city.bz - 120, 95, 70, 60, 0.4);
+      add(new THREE.IcosahedronGeometry(1, 1), flat('#7a7164'), 40, 8, -city.bz - 105, 55, 45, 40, 1.1);
+      add(new THREE.IcosahedronGeometry(1, 1), flat('#9a9080'), -115, 4, -city.bz - 95, 45, 28, 35, 2.0);
+      for (const [x, z, w] of [[-60, -city.bz - 70, 14], [70, -city.bz - 80, 18], [10, -city.bz - 60, 10]]) add(new THREE.IcosahedronGeometry(1, 0), flat('#948a7a'), x, w * 0.4, z, w, w * 0.8, w * 0.9, x);
+    }
+    if (lm.has('hills')) {   // green hills all around the city (Enugu sits among hills)
+      const hr = rnd(77);
+      const cols = ['#5f8a3a', '#6f9a42', '#547c34', '#7a9a4a'];
+      for (let i = 0; i < 46; i++) {
+        const a = (i / 46) * Math.PI * 2 + hr() * 0.1;
+        const ex = city.bx + 45 + hr() * 50, ez = city.bz + 45 + hr() * 50;
+        const w = 40 + hr() * 45, hgt = 18 + hr() * 42;
+        add(new THREE.IcosahedronGeometry(1, 1), flat(cols[i % cols.length]), Math.cos(a) * ex, hgt * 0.25, Math.sin(a) * ez, w, hgt, w * (0.8 + hr() * 0.5), hr() * 6);
+      }
+    }
+    if (lm.has('headframe')) {   // a coal-mine headframe and a coal heap beside the factory (Enugu is the Coal City)
+      const f = city.buildings.find((b) => b.k === 'factory');
+      if (f) {
+        const x = f.x + f.w / 2 + 11, z = f.z, steel = standard({ color: '#3b3f46', metalness: 0.6, roughness: 0.5 });
+        for (const sx of [-1, 1]) {
+          const leg = add(new THREE.BoxGeometry(0.7, 26, 0.7), steel, x + sx * 2.6, 12.5, z, 1, 1, 1); leg.rotation.z = -sx * 0.16;
+        }
+        add(new THREE.BoxGeometry(6.5, 0.6, 0.6), steel, x, 22.2, z);
+        add(new THREE.CylinderGeometry(2.1, 2.1, 0.5, 16), standard({ color: '#c9a227', metalness: 0.4 }), x, 24.6, z, 1, 1, 1).rotation.x = Math.PI / 2;
+        add(new THREE.BoxGeometry(7, 4.5, 5), standard({ color: '#6a4a38' }), x, 2.25, z);
+        add(new THREE.ConeGeometry(7, 5, 10), flat('#1c1c20'), x + 13, 2.5, z + 4);
+        add(new THREE.ConeGeometry(5, 3.6, 9), flat('#25252a'), x + 19, 1.8, z - 3);
+      }
+    }
+    if (lm.has('lagoon')) {   // Lagos: the lagoon with a long bridge across it, south of the city
+      const water = new THREE.Mesh(new THREE.PlaneGeometry(city.bx * 2 + 500, 300), standard({ color: '#2d6f8f', roughness: 0.25, metalness: 0.2 }));
+      water.rotation.x = -Math.PI / 2; water.position.set(0, -0.02, city.bz + 55 + 150); root.add(water); disposables.push(water.geometry);
+      const deck = standard({ color: '#9a9ba0' });
+      add(new THREE.BoxGeometry(city.bx * 2 + 300, 1.2, 9), deck, 0, 7, city.bz + 120);
+      for (let x = -city.bx - 120; x <= city.bx + 120; x += 30) {
+        add(new THREE.BoxGeometry(2.4, 7, 2.4), deck, x, 3.5, city.bz + 120);
+        add(new THREE.CylinderGeometry(0.12, 0.12, 14, 5), standard({ color: '#c8c8cc' }), x + 15, 14, city.bz + 120);
+      }
+      for (let i = 0; i < 5; i++) add(new THREE.BoxGeometry(5, 1.2, 1.8), standard({ color: ['#e8e8e8', '#c0392b', '#f1c40f'][i % 3] }), -120 + i * 60, 0.2, city.bz + 70 + (i % 2) * 25);
+    }
+  }
+
   // Shopfront signs, awnings and glowing doors for every place you can enter.
   const doorGlow = [];
   const doorLeaves = [];
   for (const [id, d] of Object.entries(city.doors)) {
+    if (info.visit && !info.visit.includes(id)) continue;   // a visitor only sees the places they may enter (the server decides)
     const name = info.names[id];
     const accent = info.accents[id];
     const south = d.f === 's'; // the building's front faces south (toward +z)
@@ -381,10 +445,10 @@ export function createCity(info) {
       deck.push(mk(len, 0.7, 4.2, cx, Y, cz));
       for (const d of [-0.75, 0.75]) rails.push(alongX ? (() => { const g = new THREE.BoxGeometry(len, 0.14, 0.12); g.translate(cx, Y + 0.5, cz + d); return g; })() : (() => { const g = new THREE.BoxGeometry(0.12, 0.14, len); g.translate(cx + d, Y + 0.5, cz); return g; })());
       for (let t = -len / 2 + 0.7; t < len / 2; t += 1.5) { const g = new THREE.BoxGeometry(alongX ? 0.3 : 2.1, 0.1, alongX ? 2.1 : 0.3); g.translate(alongX ? cx + t : cx, Y + 0.42, alongX ? cz : cz + (z1 > z0 ? t : -t) * (z1 > z0 ? 1 : 1)); ties.push(g); }
-      for (let t = 0; t <= len; t += 14) {
+      for (let t = 0; t <= len; t += 28) {
         const px = alongX ? x0 + (x1 > x0 ? t : -t) : x0, pz = alongX ? z0 : z0 + (z1 > z0 ? t : -t);
         if (isJunction(px, pz)) continue;
-        const h = new THREE.CylinderGeometry(0.45, 0.6, Y - 0.35, 8); h.translate(px, (Y - 0.35) / 2, pz); pillars.push(h);
+        const h = new THREE.CylinderGeometry(0.5, 0.65, Y - 0.35, 10); h.translate(px, (Y - 0.35) / 2, pz); pillars.push(h);
       }
     }
     root.add(new THREE.Mesh(mergeGeometries(deck), standard({ color: '#9a9a9f' })));
@@ -560,7 +624,7 @@ export function createCity(info) {
     tmp.scale.setScalar(1);
   };
   // Real car models for the cars near people (a few at a time, so phones keep up); the far ones stay simple boxes.
-  const NEAR_MAX = 14, NEAR_DIST = 48;
+  const NEAR_MAX = 18, NEAR_DIST = 60;
   const nearPool = {}; // model -> [{ obj, used }]
   for (const n of new Set(TRAFFIC_MODELS)) loadCar(n);
   loadCar('police');

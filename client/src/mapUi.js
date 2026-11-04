@@ -12,7 +12,7 @@ const el = (tag, cls, text) => {
 // One icon per kind of place. Our own picks, not copied from anywhere.
 export const ICONS = {
   shop: '🛍️', boutique: '👗', homestore: '🛋️', pharmacy: '💊', jobs: '💼', market: '🧺', bank: '🏦', plaza: '⛲', police: '🚓',
-  gym: '🏋️', terminal: '🚆', hospital: '🏥', library: '📚', airport: '✈️', garage: '🚗', club: '🪩', home: '🏠',
+  gym: '🏋️', terminal: '🚆', hospital: '🏥', library: '📚', airport: '✈️', garage: '🚗', club: '🪩', hotel: '🏨', eventcenter: '🎤', home: '🏠',
 };
 export const iconOf = (id) => ICONS[id] || '📍';
 
@@ -109,7 +109,8 @@ export function createMapUi({ socket, getPos, getRooms, getCurrentRoom, getMetho
       const d = doorOf(id);
       if (!d) continue;
       const r = rooms.find((q) => q.id === id);
-      const b = el('button', `planBubble${state.selected === id ? ' on' : ''}${r && !r.open ? ' shut' : ''}${here === id ? ' here' : ''}`, iconOf(id));
+      const b = el('button', `planBubble${state.selected === id ? ' on' : ''}${r && !r.open ? ' shut' : ''}${here === id ? ' here' : ''}`, id === 'garage' ? '' : iconOf(id));
+      if (id === 'garage') b.classList.add('logo');
       b.dataset.id = id;
       b.setAttribute('aria-label', r ? r.name : id);
       b.style.left = `${px(d.x)}px`;
@@ -150,7 +151,7 @@ export function createMapUi({ socket, getPos, getRooms, getCurrentRoom, getMetho
     card.id = 'planCard';
     const name = r ? r.name : id;
     const head = el('div', 'planCardHead');
-    head.append(el('span', 'planCardIcon', iconOf(id)), el('span', 'skillName', name));
+    head.append(el('span', id === 'garage' ? 'planCardIcon logo' : 'planCardIcon', id === 'garage' ? '' : iconOf(id)), el('span', 'skillName', name));
     card.append(head);
     if (r) card.append(el('div', 'billWho', r.solo ? r.hours : r.open ? `Open ${r.hours}` : `Closed · open ${r.hours}`));
     const pos = getPos();

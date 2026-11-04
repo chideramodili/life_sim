@@ -4,10 +4,11 @@
 // If the models cannot load, the simple built-in figure stays, so the game still works.
 import * as THREE from 'three';
 import { NAPE } from './nape.js';
+import { CLOTH } from './clothmask.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { applyHairStyle } from './hair.js';
-import { captureRig, poseStand, poseSit, poseExercise, exerciseTilt, poseReach } from './rig.js';
+import { captureRig, poseWork, poseStand, poseSit, poseExercise, exerciseTilt, poseReach } from './rig.js';
 
 const BODIES = ['man', 'woman'];
 const HEIGHT = 1.75;   // metres for the man; the woman keeps her size relative to him
@@ -55,9 +56,9 @@ function rgb2hsv(r, g, b) {
   const h = mx === r ? ((g - b) / d + (g < b ? 6 : 0)) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
   return [h * 60, d / mx, mx];
 }
-function bakeTexture(body, look, src) {
+export function bakeTexture(body, look, src, cloth, tag = '') {
   const covered = !!look.style && look.style !== 'original';   // a hairstyle shell hides the model's own hair
-  const key = `${body}:${look.skin}:${look.hair}:${look.eyes}:${covered ? 1 : 0}`;
+  const key = `${tag}${body}:${look.skin}:${look.hair}:${look.eyes}:${covered ? 1 : 0}:${cloth ? cloth.top + cloth.bottom + cloth.shoes : ''}`;
   if (bakes[key]) return bakes[key];
   const img = src.image;
   const W = img.width || 1024, k = W / 1024;
@@ -98,6 +99,33 @@ function bakeTexture(body, look, src) {
     }
     ctx.putImageData(all, 0, 0);
   }
+  if (cloth && CLOTH[body]) {
+    // outfit colours: the grey top and the dark trousers are painted into the texture, so recolour those pixels (keeping their shading)
+    const all = ctx.getImageData(0, 0, cv.width, cv.height), d = all.data;
+    for (const slot of ['top', 'bottom', 'shoes']) {
+      if (!cloth[slot]) continue;
+      const u = CLOTH[body][slot], t = new THREE.Color(cloth[slot]);
+      const m = document.createElement('canvas'); m.width = cv.width; m.height = cv.height;
+      const mc = m.getContext('2d'); mc.fillStyle = '#fff'; mc.strokeStyle = '#fff'; mc.lineWidth = 2 * k;
+      for (let i = 0; i < u.length; i += 6) { mc.beginPath(); mc.moveTo(u[i] * cv.width, u[i + 1] * cv.height); mc.lineTo(u[i + 2] * cv.width, u[i + 3] * cv.height); mc.lineTo(u[i + 4] * cv.width, u[i + 5] * cv.height); mc.closePath(); mc.fill(); mc.stroke(); }
+      const mk = mc.getImageData(0, 0, cv.width, cv.height).data, hit = [];
+      let sum = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (mk[i] < 128) continue;
+        const [h, s] = rgb2hsv(d[i] / 255, d[i + 1] / 255, d[i + 2] / 255);
+        if (slot !== 'shoes' && (h <= 30 || h >= 345) && s > 0.2) continue;   // skin and hair stay (shoes are painted over the bare feet) (the grey top is only slightly warm)
+        hit.push(i); sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      }
+      if (!hit.length) continue;
+      const avg = sum / hit.length;
+      for (const i of hit) {
+        const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const f = Math.max(0.6, Math.min(1.12, lum / avg)) * 255;
+        d[i] = Math.min(255, t.r * f); d[i + 1] = Math.min(255, t.g * f); d[i + 2] = Math.min(255, t.b * f);
+      }
+    }
+    ctx.putImageData(all, 0, 0);
+  }
   if (look.eyes !== 'brown') {
     const t = new THREE.Color(EYE_COLOURS[look.eyes]);
     for (const [cx, cy, r] of IRIS[body]) {
@@ -129,7 +157,8 @@ export function applyLook(group, look = {}) {
   const hair = Object.hasOwn(HAIR_COLOURS, look.hair) ? look.hair : 'brown';
   const skin = Number.isInteger(look.skin) && look.skin >= 0 && look.skin < SKIN_TONES.length ? look.skin : 0;
   const style = look.style || 'original';
-  const L = { eyes, hair, skin, style }, id = `${eyes}|${hair}|${skin}|${style === 'original' ? 0 : 1}`;
+  const cloth = group.userData.cloth || null;
+  const L = { eyes, hair, skin, style }, id = `${eyes}|${hair}|${skin}|${style === 'original' ? 0 : 1}|${cloth ? cloth.top + cloth.bottom + cloth.shoes : ''}`;
   const M = group.userData.model;
   group.userData.lookWant = { ...L, style, face: look.face };
   if (!M) return;
@@ -142,7 +171,7 @@ export function applyLook(group, look = {}) {
     if (!o.userData.origMap) o.userData.origMap = o.material.map;
     const src = o.userData.origMap;
     if (!src || !src.image) return;
-    o.material.map = id === 'brown|brown|0|0' ? src : bakeTexture(M.body, L, src);
+    o.material.map = id === 'brown|brown|0|0|' ? src : bakeTexture(M.body, L, src, cloth);
     o.material.needsUpdate = true;
   });
 }
@@ -197,7 +226,15 @@ function detachModel(group) {
 export function dressModel(group, look, catalog) {
   const M = group.userData.model;
   if (!M) return;
-  const acc = (look || []).map((id) => (id && catalog ? catalog.byId[id] : null))[3];
+  const worn = (look || []).map((id) => (id && catalog ? catalog.byId[id] : null));
+  const acc = worn[3];
+  const cl = { top: worn[0] ? worn[0].color : null, bottom: worn[1] ? worn[1].color : null, shoes: worn[2] ? worn[2].color : null };
+  const nk = (cl.top || '') + (cl.bottom || '') + (cl.shoes || '');
+  if (nk !== (group.userData.cloth ? group.userData.cloth.top + group.userData.cloth.bottom + group.userData.cloth.shoes : '')) {
+    group.userData.cloth = nk ? { top: cl.top || '', bottom: cl.bottom || '', shoes: cl.shoes || '' } : null;
+    M.lookId = null;   // rebake with the new colours
+    if (group.userData.lookWant) applyLook(group, group.userData.lookWant);
+  }
   for (const m of M.extras) { m.parent && m.parent.remove(m); m.geometry.dispose(); m.material.dispose(); }
   M.extras = [];
   if (!acc) return;
@@ -213,6 +250,7 @@ export function dressModel(group, look, catalog) {
     b.add(mesh);
     M.extras.push(mesh);
   };
+  if (!acc) return;
   if (acc.kind === 'cap') {
     const g = new THREE.SphereGeometry(1, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2); g.scale(0.098, 0.105, 0.115);
     put('Head', new THREE.Mesh(g, mat(acc.color)), 0, 0.165, 0.004, -0.06);
@@ -221,6 +259,97 @@ export function dressModel(group, look, catalog) {
   else if (acc.kind === 'watch') put('LeftHand', new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.012, 8, 12), mat(acc.color)), 0, 0.02, 0);
   else if (acc.kind === 'bag') put('Spine', new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.26, 0.1), mat(acc.color)), 0.22, -0.05, 0.05);
   else if (acc.kind === 'chain') put('Spine', new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.014, 8, 16), mat(acc.color)), 0, 0.13, 0.1, Math.PI / 2.4);
+}
+
+// ---- Things held while working: rag, mop and bucket, tray, book. Each is stuck to a hand bone but kept at a fixed angle relative to the body. ----
+const always_props = (style) => style === 'mop' || style === 'tray' || style === 'shelve' || style === 'carry' || style === 'coach';
+const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _qc = new THREE.Quaternion();
+function clearProps(group, M) {
+  for (const pr of M.props || []) { pr.obj.parent && pr.obj.parent.remove(pr.obj); }
+  if (M.bucket) { M.bucket.parent && M.bucket.parent.remove(M.bucket); M.bucket = null; }
+  M.props = []; M.propStyle = null;
+}
+function buildProp(style) {
+  const out = [];
+  const grp = new THREE.Group();
+  if (style === 'wash') {
+    grp.add(new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.03, 0.12), mat('#f2d046')));
+    out.push({ bone: 'RightHand', grp, q: [0, 0, 0] });
+  } else if (style === 'mop') {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 1.35, 8), mat('#a77b4b')); pole.position.y = -0.4;
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.05, 0.12), mat('#e6e1d0')); head.position.y = -1.05;
+    grp.add(pole, head);
+    out.push({ bone: 'RightHand', grp, q: [-0.6, 0, 0] });
+  } else if (style === 'tray') {
+    const tray = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.02, 16), mat('#c9ced6')); tray.position.y = 0.08;
+    grp.add(tray);
+    for (const [x, z, c] of [[-0.07, 0, '#e8e8e8'], [0.07, 0.03, '#d9453d'], [0, -0.07, '#e8e8e8']]) { const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.025, 0.08, 8), mat(c)); cup.position.set(x, 0.13, z); grp.add(cup); }
+    out.push({ bone: 'RightHand', grp, q: [0, 0, 0] });
+  } else if (style === 'shelve') {
+    grp.add(new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.22, 0.04), mat('#3a6ea5')));
+    out.push({ bone: 'RightHand', grp, q: [0, 0, 0] });
+  } else if (style === 'carry') {          // a cardboard parcel with a label, held at the chest
+    grp.add(new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.26), mat('#b98a52')));
+    const lab = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.005, 0.09), mat('#f4f4f0')); lab.position.set(0, 0.103, 0); grp.add(lab);
+    grp.children.forEach((c) => c.position.add(new THREE.Vector3(0.13, 0.08, 0.14)));
+    out.push({ bone: 'RightHand', grp, q: [0, 0, 0] });
+  } else if (style === 'coach') {          // clipboard
+    const board = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.02, 0.26), mat('#6b4a2f')); board.position.set(-0.08, 0.1, 0.1);
+    const sheet = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.005, 0.22), mat('#f4f4f0')); sheet.position.set(-0.08, 0.112, 0.1);
+    grp.add(board, sheet);
+    out.push({ bone: 'LeftHand', grp, q: [0.5, 0, 0] });
+  } else if (style === 'mic') {            // microphone
+    const hd = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), mat('#2a2a2e')); hd.position.y = 0.12;
+    const hdl = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.012, 0.13, 8), mat('#555a62')); hdl.position.y = 0.04;
+    grp.add(hd, hdl);
+    out.push({ bone: 'RightHand', grp, q: [-0.2, 0, 0] });
+  } else if (style === 'type') {           // open laptop resting on the left forearm
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.02, 0.21), mat('#b8bcc4')); base.position.set(-0.1, 0.05, 0.1);
+    const scr = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.012), mat('#1c2030')); scr.position.set(-0.1, 0.16, 0.2); scr.rotation.x = -0.25;
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.16), new THREE.MeshBasicMaterial({ color: '#5ab0ff' })); glow.position.set(-0.1, 0.16, 0.19); glow.rotation.x = Math.PI - 0.25; glow.rotation.y = Math.PI;
+    grp.add(base, scr, glow);
+    out.push({ bone: 'LeftHand', grp, q: [0, 0, 0] });
+  } else if (style === 'desk') {
+    const pen = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.14, 6), mat('#1c2f6b')); pen.position.y = -0.05;
+    grp.add(pen);
+    out.push({ bone: 'RightHand', grp, q: [-0.9, 0, 0] });
+  }
+  return out;
+}
+function syncProps(group, M, style, dt, t) {
+  if ((M.propStyle || null) !== style) {
+    clearProps(group, M);
+    if (style) {
+      M.root.updateMatrixWorld(true);
+      for (const d of buildProp(style)) {
+        const b = M.bones[d.bone]; if (!b) continue;
+        const k = (factor || 1) / (new THREE.Vector3().setFromMatrixScale(b.matrixWorld).x || 1);
+        d.grp.scale.setScalar(k);
+        d.grp.position.set(0, 0.07 * k, 0);
+        b.add(d.grp);
+        M.props.push({ obj: d.grp, bone: b, rootQ: new THREE.Quaternion().setFromEuler(new THREE.Euler(...d.q)) });
+      }
+      if (style === 'mop') {   // a yellow mop bucket on wheels that moves along beside the cleaner
+        const bk = new THREE.Group();
+        const tub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.15, 0.32, 14), mat('#f2c230')); tub.position.y = 0.2;
+        const wr = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.12, 0.12), mat('#555')); wr.position.set(0, 0.42, -0.14);
+        bk.add(tub, wr); group.add(bk); M.bucket = bk;
+      }
+    }
+    M.propStyle = style;
+  }
+  if (!style) return;
+  M.root.updateMatrixWorld(true);
+  M.root.getWorldQuaternion(_qa);
+  for (const pr of M.props) {
+    pr.bone.getWorldQuaternion(_qb);
+    _qc.copy(_qa).multiply(pr.rootQ);
+    pr.obj.quaternion.copy(_qb.invert()).multiply(_qc);
+  }
+  if (M.bucket) {
+    const ry = M.root.rotation.y;
+    M.bucket.position.set(Math.cos(ry) * 0.6 + Math.sin(ry) * 0.45, 0, -Math.sin(ry) * 0.6 + Math.cos(ry) * 0.45);
+  }
 }
 
 // Called every frame. speed is how fast the person is moving (m/s), heading the way they face,
@@ -270,7 +399,17 @@ export function animateModel(group, dt, speed, heading, working, t, sitting = fa
     const d = ((heading - M.root.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
     M.root.rotation.y += d * Math.min(1, dt * 10);
   }
-  poseStand(M.rig, t, M.b, working && M.b > 0.5, M.phase);
+  const wk = group.userData.work;   // { style, face } while on a shift with a work routine
+  if (wk && wk.face != null && speed <= WALK_MIN) {   // standing at the work station: turn to face it
+    const d = ((wk.face - M.root.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    M.root.rotation.y += d * Math.min(1, dt * 8);
+  }
+  poseStand(M.rig, t, M.b, working && !wk && M.b > 0.5, M.phase);
+  if (wk) {
+    const always = always_props(wk.style);   // these keep their arms while walking
+    poseWork(M.rig, wk.style, t, always ? 1 : M.b);
+  }
+  syncProps(group, M, wk && (always_props(wk.style) || M.b > 0.5) ? wk.style : null, dt, t);
   // Reaching for a door handle (set by the street view while you are right at a door).
   const rw = group.userData.reach || 0;
   if (rw > 0.02) poseReach(M.rig, rw);

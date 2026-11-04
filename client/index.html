@@ -146,7 +146,7 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
 #chat { bottom: 0; left: 50%; transform: translateX(-50%); width: min(400px, 100vw); box-sizing: border-box; border-radius: 16px 16px 0 0; z-index: 9; padding: 16px; max-height: 80vh; overflow-y: auto; }
 .chead { display: flex; justify-content: space-between; align-items: center; font-weight: 700; }
 #chatBadge { display: inline-block; background: var(--bg); color: var(--hi); border-radius: 8px; padding: 0 7px; font-size: calc(12px * var(--fs)); margin-left: 6px; }
-#workBtn, #workBtn2 { width: 100%; height: 40px; border: 0; border-radius: 10px; font-weight: 600; color: #0f3d2e; background: #3ddc97; margin-bottom: 8px; }
+#workBtn, #workBtn2, #workBtn3 { width: 100%; height: 40px; border: 0; border-radius: 10px; font-weight: 600; color: #0f3d2e; background: #3ddc97; margin-bottom: 8px; }
 #chatPanel { bottom: 70px; left: 12px; width: min(340px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; }
 #chatList { height: 190px; overflow-y: auto; padding-right: 4px; }
 .cm { font-size: calc(13px * var(--fs)); padding: 4px 0; line-height: 1.4; word-break: break-word; }
@@ -277,6 +277,11 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     #photoModal button { height: 42px; padding: 0 18px; border: 0; border-radius: 10px; font-weight: 600; background: var(--hi); color: var(--on-hi); }
     #doorBtn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 96px; z-index: 6; height: 46px; padding: 0 22px; border: 0; border-radius: 23px; font-weight: 700; background: var(--hi); color: var(--on-hi); box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
     #doorBtn[hidden] { display: none; }
+    #radioPanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
+    .radioSoon { display: flex; gap: 8px; margin-top: 10px; }
+    .radioTile { flex: 1; border: 1px dashed var(--line); border-radius: 10px; padding: 8px 4px; text-align: center; color: var(--muted); display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+    .radioTile span { font-size: 10px; letter-spacing: .1em; }
+    .radioRow .mini { margin-top: 6px; }
     #bankBtn { width: 100%; height: 40px; border: 0; border-radius: 10px; font-weight: 600; background: var(--hi); color: var(--on-hi); margin-bottom: 8px; }
     #bankPanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
     .bankPair { display: flex; gap: 8px; margin-top: 8px; }
@@ -323,14 +328,17 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
       <button id="lookBtn">Look</button>
       <button id="billsBtn">Bills<span id="billsBadge" hidden></span></button>
       <button id="skillsBtn">Skills</button>
+      <button id="radioBtn">Radio</button>
       <button id="peopleBtn">People<span id="peopleBadge" hidden></span></button>
       <button id="friendsBtn">Friends<span id="friendsBadge" hidden>0</span></button>
     </div>
     <button id="workBtn" hidden>Work a shift</button>
     <button id="workBtn2" hidden>Work part-time</button>
+    <button id="workBtn3" hidden>Work part-time</button>
     <button id="jobsBtn" hidden>Jobs board</button>
     <button id="carsBtn" hidden>Vehicles for sale</button>
     <button id="phoneBtn" hidden>Phone store</button>
+    <button id="laptopBtn" hidden>Laptop store</button>
     <button id="bankBtn" hidden>Open the Bank</button>
     <button id="storeBtn" hidden>Furniture store</button>
     <button id="decoBtn" hidden>Decorate my home</button>
@@ -472,6 +480,20 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     </div>
   </div>
 
+  <div id="radioPanel" class="panel" hidden>
+    <div class="sheetHead"><span>Radio</span><button id="radioClose" class="closeX" aria-label="Close radio">×</button></div>
+    <div id="radioNow" class="fine"></div>
+    <label class="fine" style="display:flex;gap:8px;align-items:center;margin:6px 0;">Volume <input id="radioVol" type="range" min="0" max="100" step="1" style="flex:1"></label>
+    <div id="radioBody"></div>
+    <div class="fine">Built-in stations are made live in your browser, so they are free to use. Spotify and Apple Music are coming later.</div>
+  </div>
+
+  <div id="laptopPanel" class="panel" hidden>
+    <div class="sheetHead"><span>Laptop store</span><button id="laptopClose" class="closeX" aria-label="Close laptop store">×</button></div>
+    <div id="laptopBody"></div>
+    <div class="fine">You need a laptop to learn Coding and to do developer jobs from home. A better laptop is needed for senior work. When you upgrade, your old laptop is traded in for half its price.</div>
+  </div>
+
   <div id="phonePanel" class="panel" hidden>
     <div class="sheetHead"><span>Phone store</span><button id="phoneClose" class="closeX" aria-label="Close phone store">×</button></div>
     <div id="phoneBody"></div>
@@ -585,6 +607,7 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     <div id="jobsBody"></div>
     <button id="quitJob" class="mini" style="margin-top:10px;" hidden>Quit my main job</button>
     <button id="quitJob2" class="mini" style="margin-top:10px;" hidden>Quit my part-time job</button>
+    <button id="quitJob3" class="mini" style="margin-top:10px;" hidden>Quit my second part-time job</button>
   </div>
 
   <div id="billsPanel" class="panel" hidden>

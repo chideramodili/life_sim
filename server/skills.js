@@ -74,8 +74,8 @@ export const JOBS = [
   { id: 'seller',     title: 'Craft seller',            pay: 16000, room: 'market', req: { skill: 'crafting', level: 2 } },
   { id: 'trainer',    title: 'Gym trainer',             pay: 18000, room: 'gym',    req: { skill: 'fitness', level: 3 }, ref: 'Referral: Coach Femi' },
   { id: 'mc',         title: 'Club MC',                 pay: 25000, room: 'club',   req: { skill: 'speaking', level: 4 }, ref: 'Referral: DJ Tunde' },
-  { id: 'dev_jr',     title: 'Junior web developer',    pay: 30000, room: 'home',   remote: true, req: { skill: 'coding', level: 3 } },
-  { id: 'dev_sr',     title: 'Senior web developer',    pay: 60000, room: 'home',   remote: true, req: { skill: 'coding', level: 7 } },
+  { id: 'dev_jr',     title: 'Junior web developer',    pay: 30000, room: 'home',   remote: true, laptop: 1, req: { skill: 'coding', level: 3 } },
+  { id: 'dev_sr',     title: 'Senior web developer',    pay: 60000, room: 'home',   remote: true, laptop: 2, req: { skill: 'coding', level: 7 } },
   // Starter jobs: nothing needed to apply, so every new player has real choices. They pay less than the skilled jobs.
   { id: 'cleaner',    title: 'Cleaner',                 pay: 5000,  room: 'plaza',   part: true, skill: 'crafting' },
   { id: 'cashier',    title: 'Cashier',                 pay: 6500,  room: 'market',  part: true, skill: 'speaking' },

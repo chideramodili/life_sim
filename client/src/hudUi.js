@@ -139,7 +139,7 @@ export function initHud(socket, look) {
   // ----- action pills -----
   const actions = el('div');
   actions.id = 'actions';
-  for (const id of ['workBtn', 'workBtn2', 'jobsBtn', 'carsBtn', 'phoneBtn', 'bankBtn', 'storeBtn', 'decoBtn', 'boutiqueBtn', 'wardrobeBtn', 'medBtn']) {
+  for (const id of ['workBtn', 'workBtn2', 'workBtn3', 'jobsBtn', 'carsBtn', 'phoneBtn', 'laptopBtn', 'bankBtn', 'storeBtn', 'decoBtn', 'boutiqueBtn', 'wardrobeBtn', 'medBtn']) {
     const b = $(id);
     if (b) actions.append(b);
   }

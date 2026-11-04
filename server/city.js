@@ -5,6 +5,7 @@
 // Map (x goes east, z goes south). One unit is about one metre.
 //   Enugu Boulevard runs east-west through the middle. Five cross streets run north-south. Two secondary roads and two ring
 //   roads run east-west. That makes 24 blocks: 6 columns by 4 rows.
+import { CITIES } from './cities.js';
 export const CITY = {
   bx: 168, bz: 114,                      // how far a player can walk
   spawn: process.env.CITY_SPAWN ? { x: Number(process.env.CITY_SPAWN.split(',')[0]), z: Number(process.env.CITY_SPAWN.split(',')[1]) } : { x: 28, z: 9.2 }, // where you arrive by map (CITY_SPAWN is for tests only)
@@ -24,19 +25,32 @@ function rng(seed) {
 
 // Empty building lots that players can buy. A few ordinary buildings (shops, offices, warehouses, flats, with no venue) are
 // taken out of the city and their ground is sold as lots instead. This uses its own random generator, so nothing else moves.
-function findLots(seed, buildings) {
+function findLots(seed, buildings, max = 12, gap = 30) {
   const rr = rng((seed ^ 0x10751) >>> 0);
   const ok = buildings.filter((b) => !b.v && (b.k === 'shop' || b.k === 'office' || b.k === 'warehouse' || b.k === 'apt') && b.w >= 9 && b.d >= 8);
   const clearOfStalls = (b) => !buildings.some((o) => o.k === 'stall' && Math.abs(o.x - b.x) < (o.w + Math.min(b.w, LOT_W)) / 2 && Math.abs(o.z - b.z) < (o.d + Math.min(b.d, LOT_D)) / 2);
   const cand = ok.filter(clearOfStalls).map((b) => ({ b, key: rr() })).sort((p, q) => p.key - q.key).map((c) => c.b);
+  // The first 12 are chosen exactly as before, so lot numbers that players already own never move. Cities with more land
+  // add extra lots afterwards (their numbers come after the first 12).
   const picked = [];
   for (const b of cand) {
     if (picked.length >= 12) break;
     if (picked.some((p) => Math.hypot(p.x - b.x, p.z - b.z) < 30)) continue;
     picked.push(b);
   }
-  for (const b of picked) buildings.splice(buildings.indexOf(b), 1);
+  const extra = [];
+  if (max > 12) {
+    for (const b of cand) {
+      if (picked.length + extra.length >= max) break;
+      if (picked.includes(b)) continue;
+      if ([...picked, ...extra].some((p) => Math.hypot(p.x - b.x, p.z - b.z) < gap)) continue;
+      extra.push(b);
+    }
+  }
+  for (const b of [...picked, ...extra]) buildings.splice(buildings.indexOf(b), 1);
   picked.sort((p, q) => p.x - q.x || p.z - q.z);
+  extra.sort((p, q) => p.x - q.x || p.z - q.z);
+  picked.push(...extra);
   return picked.map((b, id) => {
     const w = Math.min(LOT_W, Math.max(10, Math.round(b.w))), d = Math.min(LOT_D, Math.max(8, Math.round(b.d)));
     const dist = Math.hypot(b.x, b.z); // closer to the middle of town costs more
@@ -201,7 +215,17 @@ export function generateCity(seed = 20260) {
     { id: 'south', name: 'Southgate Platform', x: 6.5, z: 80 },
   ];
 
-  const lots = findLots(seed, buildings);
+  // Two more public venues in towers: the Hotel and the Event Centre. Chosen by distance (no random numbers), so nothing else moves.
+  for (const [venue, tx, tz] of [['hotel', -62, -34], ['eventcenter', 66, 30]]) {
+    const towers = buildings.filter((b) => b.k === 'tower' && !b.v && b.w >= 8).sort((p, q) => Math.hypot(p.x - tx, p.z - tz) - Math.hypot(q.x - tx, q.z - tz));
+    const b = towers[0];
+    if (!b) continue;
+    b.v = venue;
+    doors[venue] = { x: b.x, z: b.f === 's' ? b.z + b.d / 2 + 1.4 : b.z - b.d / 2 - 1.4, f: b.f };
+  }
+  const prof = Object.values(CITIES).find((c) => c.seed === seed);
+  const lotRule = (prof && prof.theme && prof.theme.look && prof.theme.look.lots) || {};
+  const lots = findLots(seed, buildings, lotRule.max || 12, lotRule.gap || 30);
 
   // Trees and street lights. The browser draws exactly these, and makeWalls makes them solid.
   const rt = rng((seed ^ 0x7ee5) >>> 0);
@@ -228,6 +252,28 @@ export function generateCity(seed = 20260) {
   };
 }
 
+// Where the railway viaduct stands on pillars (every PILLAR_GAP metres along each line, never in a junction). The browser draws a pillar at
+// each of these spots and makeWalls makes them solid, so keep this the same as the viaduct in client/src/street.js.
+export const PILLAR_GAP = 28;
+export function viaductPillars(city) {
+  const nsX = city.roadsNS.map((r) => r.x), stations = city.stations || [];
+  const nearestRoad = (st) => nsX.reduce((b, x) => (Math.abs(x - st.x) < Math.abs(b - st.x) ? x : b), nsX[0]);
+  const segs = [];
+  const term = stations.find((st) => st.id === 'terminal');
+  segs.push([Math.min(...stations.map(nearestRoad)), 0, term ? term.x : Math.max(...nsX), 0]);
+  for (const st of stations) if (st.id !== 'terminal') { const rx = nearestRoad(st); segs.push([rx, 0, rx, st.z]); }
+  const out = [];
+  const isJunction = (x, z) => city.roadsNS.some((r) => Math.abs(x - r.x) < 8) && city.roadsEW.some((r) => Math.abs(z - r.z) < 9);
+  for (const [x0, z0, x1, z1] of segs) {
+    const len = Math.hypot(x1 - x0, z1 - z0), alongX = Math.abs(x1 - x0) > Math.abs(z1 - z0);
+    for (let t = 0; t <= len; t += PILLAR_GAP) {
+      const px = alongX ? x0 + (x1 > x0 ? t : -t) : x0, pz = alongX ? z0 : z0 + (z1 > z0 ? t : -t);
+      if (!isJunction(px, pz)) out.push([px, pz]);
+    }
+  }
+  return out;
+}
+
 // Collision: can a player stand at (x, z)? Buildings are solid boxes. (Small things like stalls and trees are not solid.)
 const SOLID = new Set(['house', 'shop', 'apt', 'office', 'tower', 'warehouse', 'civic', 'campus', 'police', 'terminal', 'factory', 'bigbox']);
 export function makeWalls(city) {
@@ -239,6 +285,7 @@ export function makeWalls(city) {
   const clear = (x, z) => !entries.some((d) => Math.hypot(x - d.x, z - d.z) < 2.5);
   for (const [x, z] of city.trees || []) if (clear(x, z)) boxes.push(small(x, z, 0.28));
   for (const [x, z] of city.lights || []) if (clear(x, z)) boxes.push(small(x, z, 0.3));
+  for (const [x, z] of viaductPillars(city)) boxes.push(small(x, z, 0.55)); // the railway pillars are solid
   for (const s of city.busStops || []) {
     if (!clear(s.x, s.z)) continue;
     boxes.push({ x0: s.x - 1.1, x1: s.x + 1.1, z0: s.z - 0.25, z1: s.z + 0.25 });
