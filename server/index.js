@@ -171,6 +171,18 @@ const HOME_SLEEP_GAIN = 70;   // sleeping in your own bed (power on)
 const NO_POWER_SLEEP_GAIN = 25;
 const NO_POWER_SHOWER_GAIN = 15;
 
+export const EYE_IDS = ['brown', 'hazel', 'green', 'blue', 'grey', 'amber'];
+export const HAIR_IDS = ['brown', 'black', 'chestnut', 'auburn', 'ginger', 'blonde', 'grey', 'white'];
+export const SKIN_COUNT = 12;   // 0 is the model's own tone, then lighter to darker tints
+const cleanLook = (v, cur) => {
+  const o = v && typeof v === 'object' ? v : {};
+  return {
+    body: o.body === 'woman' || o.body === 'man' ? o.body : cur.body,
+    eyes: EYE_IDS.includes(o.eyes) ? o.eyes : cur.eyes,
+    skin: Number.isInteger(o.skin) && o.skin >= 0 && o.skin < SKIN_COUNT ? o.skin : cur.skin,
+    hair: HAIR_IDS.includes(o.hair) ? o.hair : cur.hair,
+  };
+};
 // A player's look. Only these values are accepted, so nobody can store anything else.
 const THEME_PRESETS = ['sunset', 'fresh', 'night'];
 const THEME_ACCENTS = ['coral', 'orange', 'gold', 'mint', 'teal', 'sky', 'pink', 'lavender'];
@@ -340,6 +352,9 @@ addColumn('bank', 'TEXT');
 addColumn('home', 'TEXT');
 addColumn('wardrobe', 'TEXT');
 addColumn('body', "TEXT NOT NULL DEFAULT 'man'");
+addColumn('eyes', "TEXT NOT NULL DEFAULT 'brown'");
+addColumn('skin', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('hair', "TEXT NOT NULL DEFAULT 'brown'");
 addColumn('phone', 'TEXT');
 addColumn('start_min', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('fines', 'TEXT');
@@ -356,6 +371,8 @@ const q = {
   userByName: db.prepare('SELECT * FROM users WHERE username = ?'),
   userById: db.prepare('SELECT * FROM users WHERE id = ?'),
   setBody: db.prepare('UPDATE users SET body = ? WHERE id = ?'),
+  setEyes: db.prepare('UPDATE users SET eyes = ? WHERE id = ?'),
+  setLook: db.prepare('UPDATE users SET body = ?, eyes = ?, skin = ?, hair = ? WHERE id = ?'),
   insertUser: db.prepare('INSERT INTO users (username, pass_hash, recovery_hash, cash, food, room, created_at, last_seen, phone, start_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   saveUser: db.prepare('UPDATE users SET cash = ?, food = ?, energy = ?, fun = ?, social = ?, clean = ?, toilet = ?, room = ?, story = ?, last_work = ?, bills = ?, skills = ?, job_id = ?, job2_id = ?, last_work2 = ?, handsets = ?, city = ?, home_city = ?, stress = ?, sick = ?, burnout = ?, vehicles = ?, net = ?, rep = ?, bank = ?, home = ?, wardrobe = ?, fines = ?, jail_until = ?, last_seen = ? WHERE id = ?'),
   addLedger: db.prepare('INSERT INTO ledger (user_id, kind, bal, cash, bal_after, cash_after, note, game_min, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
@@ -518,7 +535,7 @@ app.post('/api/signup', async (req, res) => {
     } catch {
       return res.status(409).json({ error: 'That username is taken.' });
     }
-    if (req.body.body === 'woman') q.setBody.run('woman', id);
+    { const l = cleanLook(req.body, { body: req.body.body === 'woman' ? 'woman' : 'man', eyes: 'brown', skin: 0, hair: 'brown' }); q.setLook.run(l.body, l.eyes, l.skin, l.hair, id); }
     res.status(201).json({ token: newSession(id), username, recoveryCode });
   } catch (err) {
     console.error('signup failed', err);
@@ -760,6 +777,9 @@ function snapshot(key) {
       if (p.sit) o.sit = 1;
       if (p.anim && p.anim.until > Date.now()) o.an = p.anim.k;
       if (p.body === 'woman') o.b = 1;
+      if (p.eyes && p.eyes !== 'brown') o.e = p.eyes;
+      if (p.skin) o.s = p.skin;
+      if (p.hair && p.hair !== 'brown') o.h = p.hair;
       return o;
     });
 }
@@ -1273,12 +1293,19 @@ function finishRide(p, text) {
   notice(p, text);
 }
 
+const RECOVER_MS = Number(process.env.RECOVER_MS) || 3200;
 function arrive(p) {
   const to = p.trip.to;
   const label = p.trip.label || ROOMS[to].name;
   const at = p.trip.at;
-  const tripCity = p.trip.city, drv = p.trip.drive;
+  const tripCity = p.trip.city, drv = p.trip.drive, byAmbulance = Boolean(p.trip.ambulance);
   moveNow(p, to, at ? at.x : undefined, at ? at.z : undefined, tripCity || p.city);
+  // After a car hit you wake up in the first hospital bed for a few seconds, then stand up.
+  if (byAmbulance && to === 'hospital') {
+    p.x = p.tx = -8; p.z = p.tz = -5.9;
+    p.anim = { k: 9, until: Date.now() + RECOVER_MS };
+    p.frozenUntil = Date.now() + RECOVER_MS;
+  }
   if (drv) beginDrive(p, drv.kind, drv.ry); // you drove in along the highway: you are still at the wheel
   // Things can change while someone is travelling.
   if (to === HOME && consequences(p.bills).locked) {
@@ -1731,6 +1758,9 @@ io.on('connection', (socket) => {
     homeTimes: [],
     wardrobe: parseWardrobe(saved.wardrobe),
     body: saved.body === 'woman' ? 'woman' : 'man',
+    eyes: EYE_IDS.includes(saved.eyes) ? saved.eyes : 'brown',
+    skin: Number.isInteger(saved.skin) && saved.skin >= 0 && saved.skin < SKIN_COUNT ? saved.skin : 0,
+    hair: HAIR_IDS.includes(saved.hair) ? saved.hair : 'brown',
     fines: cleanFines(saved.fines),
     jailUntil: saved.jail_until || 0,
     lastSteal: 0,
@@ -1833,6 +1863,18 @@ io.on('connection', (socket) => {
     p.body = v;
     q.setBody.run(v, p.userId);
   });
+  // The character editor saves the whole look at once. Every value is checked against the lists above.
+  socket.on('setLook', (v) => {
+    const l = cleanLook(v, p);
+    p.body = l.body; p.eyes = l.eyes; p.skin = l.skin; p.hair = l.hair;
+    q.setLook.run(l.body, l.eyes, l.skin, l.hair, p.userId);
+  });
+  // Eye colour: only the listed colours are accepted.
+  socket.on('setEyes', (v) => {
+    if (typeof v !== 'string' || !EYE_IDS.includes(v)) return;
+    p.eyes = v;
+    q.setEyes.run(v, p.userId);
+  });
   // Sit down where you stand (or stand up again). Walking anywhere stands you up.
   socket.on('sit', () => {
     if (p.sit) { p.sit = false; return; }
@@ -1842,6 +1884,7 @@ io.on('connection', (socket) => {
   });
   socket.on('moveTo', (t) => {
     if (p.trip || p.drive) return;
+    if (p.frozenUntil && Date.now() < p.frozenUntil) return; // still in the hospital bed
     if (p.sit && t && Number.isFinite(t.x) && Number.isFinite(t.z) && Math.hypot(t.x - p.x, t.z - p.z) > 0.3) p.sit = false;
     const now = Date.now();
     if (now - p.lastMove < 50) return; // ignore floods

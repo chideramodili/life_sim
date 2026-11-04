@@ -91,5 +91,12 @@ export function exerciseTilt(kind, t) {
   const up = (Math.sin(t * 4.2) + 1) / 2;
   if (kind === 2) return { x: 1.42 - 0.3 * (1 - up) * 0.9, y: 0.0 };
   if (kind === 3) return { x: -1.5, y: 0.14 };
+  if (kind === 9) return { x: -1.5708, y: 0.98 };   // lying on a hospital bed, face up, head towards the back wall
   return { x: 0, y: 0 };
+}
+
+// Reaching out to push a door open: the right arm comes forward and the hand opens at chest height.
+export function poseReach(rig, w) {
+  turn(rig, 'RightArm', -1.25, 0, 0.1, w);
+  turn(rig, 'RightForeArm', 0.35, 0, 0, w);
 }

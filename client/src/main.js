@@ -9,7 +9,8 @@ import { initLook } from './settingsUi.js';
 import { initWorld } from './worldUi.js';
 import { initLife } from './lifeUi.js';
 import { initSocial } from './socialUi.js';
-import { loadModel, whenModelReady, attachModel, animateModel } from './model.js';
+import { loadModel, whenModelReady, attachModel, animateModel, applyLook } from './model.js';
+import { openCreator } from './creator.js';
 import { loadNpc } from './npc.js';
 import { initPhones } from './phoneUi.js';
 import { initHud } from './hudUi.js';
@@ -304,8 +305,9 @@ socket.on('state', ({ room, players, cars, lvl, cops, ph }) => {
       const grp = a.group; const bd = p.b ? 'woman' : 'man'; whenModelReady(() => attachModel(grp, bd));
     }
     a.target.set(p.x, 0, p.z);
-    if (p.id === myId) for (const o of document.querySelectorAll('#lookBody button')) o.classList.toggle('on', o.dataset.body === (p.b ? 'woman' : 'man'));
+    if (p.id === myId) myLook = { body: p.b ? 'woman' : 'man', eyes: p.e || 'brown', skin: p.s || 0, hair: p.h || 'brown' };
     { const bd = p.b ? 'woman' : 'man'; const gm = a.group.userData.model; if (gm && gm.body !== bd) attachModel(a.group, bd); }
+    applyLook(a.group, { eyes: p.e || 'brown', skin: p.s || 0, hair: p.h || 'brown' });
     a.group.userData.baseColor = p.color;
     dressAvatar(a.group, p.look, fashionCat);
     a.working = Boolean(p.work);
@@ -361,7 +363,7 @@ $('parkBtn').onclick = () => socket.emit('drive', { on: false });
 loadModel();
 loadNpc();
 if (location.search.includes('dumpSolids')) window.__interior = interior;
-if (location.search.includes('debug')) window.__socket = socket;
+if (location.search.includes('debug')) { window.__socket = socket; window.__three = { scene, camera, controls }; }
 
 // ---------- Police cars ----------
 const copCars = [];
@@ -741,21 +743,25 @@ async function callApi(path, body) {
   return { ok: res.ok, data };
 }
 
-let signupBody = 'man';
-for (const b of document.querySelectorAll('#authBody button')) b.addEventListener('click', () => {
-  signupBody = b.dataset.body;
-  for (const o of document.querySelectorAll('#authBody button')) o.classList.toggle('on', o === b);
-});
-for (const b of document.querySelectorAll('#lookBody button')) b.addEventListener('click', () => {
-  socket.emit('setBody', b.dataset.body);
-  for (const o of document.querySelectorAll('#lookBody button')) o.classList.toggle('on', o === b);
-});
+// The character is made in the editor: when creating an account, and later from the Look panel.
+let signupLook = { body: 'man', eyes: 'brown', skin: 0, hair: 'brown' };
+const lookText = (l) => `${l.body === 'woman' ? 'Woman' : 'Man'} · ${l.eyes[0].toUpperCase() + l.eyes.slice(1)} eyes · ${l.hair[0].toUpperCase() + l.hair.slice(1)} hair · Skin ${l.skin + 1}`;
+$('authCharSum').textContent = lookText(signupLook);
+$('authChar').addEventListener('click', () => openCreator({
+  title: 'Your character', initial: signupLook,
+  onSave: (l) => { signupLook = l; $('authCharSum').textContent = lookText(l); },
+}));
+let myLook = { body: 'man', eyes: 'brown', skin: 0, hair: 'brown' };
+$('lookEdit').addEventListener('click', () => openCreator({
+  title: 'Edit your character', initial: myLook,
+  onSave: (l) => { myLook = l; socket.emit('setLook', l); },
+}));
 async function submitAuth(kind) {
   const username = $('user').value.trim();
   const password = $('pass').value;
   $('authError').textContent = '';
   try {
-    const { ok, data } = await callApi(`/api/${kind}`, kind === 'signup' ? { username, password, body: signupBody } : { username, password });
+    const { ok, data } = await callApi(`/api/${kind}`, kind === 'signup' ? { username, password, ...signupLook } : { username, password });
     if (!ok) {
       $('authError').className = 'err';
       $('authError').textContent = data.error || 'Something went wrong. Try again.';
@@ -1181,6 +1187,11 @@ renderer.setAnimationLoop(() => {
       a.speed += (Math.min(sp, 12) - a.speed) * Math.min(1, dt * 8);
       if (Math.hypot(mx, mz) > 0.002) a.heading = Math.atan2(mx, mz);
       a.last.copy(a.group.position);
+      if (street && a.group.visible && !a.sit && !a.veh) {
+        // Hand out to the door handle when you are right at a door; the arm drops again as you walk through or away.
+        const wantReach = street.doorDistance(a.group.position.x, a.group.position.z) < 1.5 ? 1 : 0;
+        a.group.userData.reach = (a.group.userData.reach || 0) + (wantReach - (a.group.userData.reach || 0)) * Math.min(1, dt * 8);
+      } else a.group.userData.reach = 0;
       animateModel(a.group, dt, a.speed, a.heading, a.working, tnow, a.sit && !a.veh, a.exercise || 0);
     }
     if (a.veh) {

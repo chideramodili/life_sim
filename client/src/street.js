@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { iconOf } from './mapUi.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { whenNpcReady, upgradeToNpc, moveNpc } from './npc.js';
 import { viaductSegs, createViaductTrains } from './trains.js';
 
@@ -261,6 +262,7 @@ export function createCity(info) {
 
   // Shopfront signs, awnings and glowing doors for every place you can enter.
   const doorGlow = [];
+  const doorLeaves = [];
   for (const [id, d] of Object.entries(city.doors)) {
     const name = info.names[id];
     const accent = info.accents[id];
@@ -271,8 +273,18 @@ export function createCity(info) {
     doorGlow.push(frameMat);
     const frame = new THREE.Mesh(new THREE.BoxGeometry(3, 3.6, 0.3), frameMat);
     frame.position.set(d.x, 1.8, d.z + sgn * 0.5);
-    const panel = new THREE.Mesh(new THREE.BoxGeometry(2.3, 3.2, 0.34), standard({ color: '#1d1a24', roughness: 0.4 }));
-    panel.position.set(d.x, 1.6, d.z + sgn * 0.5);
+    // The doorway is dark inside; the door leaf is hinged on one edge and swings open when someone comes near.
+    const hole = new THREE.Mesh(new THREE.BoxGeometry(2.3, 3.2, 0.3), standard({ color: '#08070b', roughness: 1 }));
+    hole.position.set(d.x, 1.6, d.z + sgn * 0.5);
+    const hinge = new THREE.Group();
+    hinge.position.set(d.x - 1.15, 0, d.z + sgn * 0.5 + sgn * 0.2);
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(2.3, 3.2, 0.12), standard({ color: '#2a2433', roughness: 0.35, metalness: 0.2 }));
+    leaf.position.set(1.15, 1.6, 0);
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.26), standard({ color: '#d8d8e0', metalness: 0.8, roughness: 0.3 }));
+    handle.position.set(2.0, 1.5, 0);
+    hinge.add(leaf, handle);
+    doorLeaves.push({ hinge, x: d.x, z: d.z, sgn, open: 0 });
+    const panel = hole;
     const awn = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.2, 0.9), standard({ color: accent, transparent: true, opacity: 0.55 }));
     awn.position.set(d.x, 3.9, d.z + sgn * 0.1);
     const tex = label(name, accent);
@@ -282,7 +294,7 @@ export function createCity(info) {
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.75), signMat);
     sign.position.set(d.x, 5.6, d.z + sgn * 0.7);
     if (!south) sign.rotation.y = Math.PI;
-    root.add(frame, panel, awn, sign);
+    root.add(frame, panel, hinge, awn, sign);
     // A round icon floating above the sign, so you can tell what a place is from far away.
     const cv = document.createElement('canvas');
     cv.width = cv.height = 128;
@@ -292,8 +304,19 @@ export function createCity(info) {
     g.lineWidth = 6; g.strokeStyle = accent; g.stroke();
     g.font = '64px system-ui, "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
     g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.fillText(iconOf(id), 64, 70);
     const itex = new THREE.CanvasTexture(cv);
+    if (id === 'garage') {
+      // Kani's Motors shows its own gold logo instead of a plain emoji.
+      g.fillStyle = '#000'; g.beginPath(); g.arc(64, 64, 58, 0, Math.PI * 2); g.fill();
+      const im = new Image();
+      im.onload = () => {
+        g.save(); g.beginPath(); g.arc(64, 64, 56, 0, Math.PI * 2); g.clip();
+        g.drawImage(im, 4, 4, 120, 120); g.restore();
+        g.lineWidth = 6; g.strokeStyle = '#d4a63a'; g.beginPath(); g.arc(64, 64, 58, 0, Math.PI * 2); g.stroke();
+        itex.needsUpdate = true;
+      };
+      im.src = '/img/kanis.jpg';
+    } else g.fillText(iconOf(id), 64, 70);
     disposables.push(itex);
     const imat = new THREE.SpriteMaterial({ map: itex, transparent: true });
     disposables.push(imat);
@@ -396,6 +419,44 @@ export function createCity(info) {
   });
   trunkI.geometry && disposables.push(trunkI.geometry, crownI.geometry);
   root.add(trunkI, crownI);
+
+  // Real tree models replace the simple stand-ins once they have loaded. Each city plants its own mix.
+  const MIX = {
+    lagos:  [['palm-tree', 0.62], ['oak-tree', 0.2], ['mangrove-tree', 0.18]],
+    abuja:  [['oak-tree', 0.55], ['palm-tree', 0.2], ['spruce-tree', 0.25]],
+    enugu:  [['oak-tree', 0.45], ['spruce-tree', 0.4], ['palm-tree', 0.15]],
+  }[info.cityId || 'lagos'] || [['oak-tree', 1]];
+  const HEIGHT = { 'palm-tree': 5.6, 'oak-tree': 5.0, 'mangrove-tree': 4.6, 'spruce-tree': 7.0 };
+  const pickKind = (i) => { let r = ((i * 2654435761) >>> 0) / 4294967296; for (const [k, w] of MIX) { if (r < w) return k; r -= w; } return MIX[0][0]; };
+  const treeKinds = {};
+  trees.forEach((t, i) => { const k = pickKind(i); (treeKinds[k] = treeKinds[k] || []).push([t[0], t[1], (t[2] || 1) / 1.15, i]); });
+  let treesGone = false;
+  Promise.all(Object.keys(treeKinds).map((k) => new GLTFLoader().loadAsync(`/models/trees/${k}.glb`).then((g) => ({ k, g })))).then((loaded) => {
+    if (treesGone) return;
+    for (const { k, g } of loaded) {
+      g.scene.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(g.scene);
+      const c = box.getCenter(new THREE.Vector3());
+      const base = HEIGHT[k] / Math.max(0.01, box.max.y - box.min.y);
+      const spots = treeKinds[k];
+      g.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        const geo = o.geometry.clone();
+        geo.applyMatrix4(o.matrixWorld);
+        geo.translate(-c.x, -box.min.y, -c.z);
+        const im = new THREE.InstancedMesh(geo, o.material, spots.length);
+        spots.forEach(([x, z, sc, i], n) => {
+          const sz = base * sc * (0.85 + (i % 5) * 0.06);
+          m4.compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), (i * 2.399) % 6.28), new THREE.Vector3(sz, sz, sz));
+          im.setMatrixAt(n, m4);
+        });
+        im.frustumCulled = false;
+        root.add(im);
+        disposables.push(geo);
+      });
+    }
+    root.remove(trunkI, crownI);
+  }).catch(() => { /* keep the simple trees */ });
 
   // Street lights: a tapering pole on a base, a curved arm reaching over the road, a lamp housing, and a soft pool of light on the ground at night.
   const poleMat = standard({ color: '#34353c', metalness: 0.55, roughness: 0.45 });
@@ -700,8 +761,21 @@ export function createCity(info) {
       haloMat.opacity = Math.max(0, 0.8 - d) * 0.45;
       for (const m of winMats) m.emissiveIntensity = Math.max(0, (0.75 - d) * 1.6);
     },
+    // How close the nearest door is to a spot on the street (metres), for the reaching-hand pose.
+    doorDistance(x, z) {
+      let best = 99;
+      for (const d of doorLeaves) best = Math.min(best, Math.hypot(x - d.x, z - d.z - d.sgn * 0.5));
+      return best;
+    },
     update(dt) {
       if (viaductTrains) viaductTrains.update(Date.now());
+      // Doors: swing open (outward, up to ~100 degrees) when anyone is within a few metres, and close again when they leave.
+      for (const d of doorLeaves) {
+        let near = false;
+        for (const q of people) if (Math.hypot(q.x - d.x, q.z - d.z - d.sgn * 1.2) < 2.4) { near = true; break; }
+        d.open += ((near ? 1 : 0) - d.open) * (1 - Math.exp(-dt * (near ? 5 : 3)));
+        d.hinge.rotation.y = -d.sgn * d.open * 1.75;
+      }
       for (const w of waiters) moveNpc(w.g, dt, 0);
       const k = 1 - Math.exp(-dt * 14);
       live.forEach((c, i) => {
@@ -741,6 +815,7 @@ export function createCity(info) {
       }
     },
     dispose() {
+      treesGone = true;
       root.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
       for (const d of disposables) d.dispose && d.dispose();
     },

@@ -57,8 +57,10 @@ body.clean #needsStrip { opacity: 1; }
 #phoneHome { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.55); padding: 10px; box-sizing: border-box; }
 #phoneHome[hidden] { display: none; }
 #phoneFrame { position: relative; width: min(390px, 100%); height: min(780px, 100%); border-radius: 44px; background: #0c0c10; padding: 10px; box-sizing: border-box; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6); }
-#phoneScreen { position: relative; width: 100%; height: 100%; border-radius: 36px; overflow: hidden; background: linear-gradient(170deg, #0f7a52 0%, #0a5a45 55%, #0b3a3a 100%); color: #fff; display: flex; flex-direction: column; padding: 0 18px 14px; box-sizing: border-box; transition: background 0.3s; }
-body.nightphone #phoneScreen { background: linear-gradient(170deg, #17122b 0%, #0e1030 60%, #07071a 100%); }
+#phoneScreen { position: relative; width: 100%; height: 100%; border-radius: 36px; overflow: hidden; background: var(--wall, none) center / cover no-repeat, linear-gradient(170deg, #0f7a52 0%, #0a5a45 55%, #0b3a3a 100%); color: #fff; display: flex; flex-direction: column; padding: 0 18px 14px; box-sizing: border-box; transition: background 0.3s; }
+#phoneScreen::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.05) 40%, rgba(0, 0, 0, 0.3)); pointer-events: none; transition: background 0.3s; }
+#phoneScreen > * { position: relative; }
+body.nightphone #phoneScreen::before { background: linear-gradient(180deg, rgba(4, 4, 20, 0.62), rgba(4, 4, 20, 0.5) 40%, rgba(4, 4, 20, 0.7)); }
 #phoneNotch { width: 120px; height: 26px; border-radius: 14px; background: #0c0c10; margin: 8px auto 0; flex: none; }
 #phoneStatus { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; margin-top: -22px; padding: 0 10px; height: 22px; flex: none; }
 #phoneClock { font-size: 64px; font-weight: 700; line-height: 1; margin-top: 26px; letter-spacing: -1px; flex: none; }
@@ -85,8 +87,8 @@ body.clean #dock #dockLight.off::before { filter: grayscale(1); }
 body.clean #chip.done { display: none !important; }
 
 /* ---------- the shopping sheet: a slide-up catalogue ---------- */
-body.clean #storePanel { top: auto; right: 0; left: 0; bottom: 0; width: auto; max-width: none; max-height: 78vh; overflow-y: auto; border-radius: 26px 26px 0 0; padding: 14px 14px 18px; z-index: 13; box-sizing: border-box; }
-@media (min-width: 700px) { body.clean #storePanel { left: 50%; right: auto; width: 560px; transform: translateX(-50%); } }
+body.clean #storePanel, body.clean #boutiquePanel, body.clean #wardrobePanel { top: auto; right: 0; left: 0; bottom: 0; width: auto; max-width: none; max-height: 78vh; overflow-y: auto; border-radius: 26px 26px 0 0; padding: 14px 14px 18px; z-index: 13; box-sizing: border-box; }
+@media (min-width: 700px) { body.clean #storePanel, body.clean #boutiquePanel, body.clean #wardrobePanel { left: 50%; right: auto; width: 560px; transform: translateX(-50%); } }
 .catChips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 10px; scrollbar-width: none; }
 .catChips::-webkit-scrollbar { display: none; }
 .catChip { flex: none; height: 38px; padding: 0 16px; border-radius: 19px; border: 0; background: rgba(255, 255, 255, 0.1); color: var(--text); font: inherit; font-size: calc(14px * var(--fs)); font-weight: 600; cursor: pointer; }
@@ -147,3 +149,84 @@ body.miniOn.clean #fpvBtn, body.miniOn.clean #seatBtn { top: 232px; }
 body.miniOn.clean #sitBtn { top: 272px; }
 body.miniOn.clean #gameBtn { top: 316px; }
 @media (max-width: 380px) { #navBar { right: 136px; } }
+
+.planBubble.logo, .planCardIcon.logo { background: #000 url(/img/kanis.jpg) center/cover no-repeat; border-color: #d4a63a; }
+.planCardIcon.logo { display: inline-block; width: 26px; height: 26px; border-radius: 50%; border: 2px solid #d4a63a; vertical-align: middle; }
+
+
+/* ================= liquid glass =================
+   A glossy, see-through look: frosted blur, a bright rim, a soft light streak across the top and a deep soft shadow.
+   Switch it off with body.noglass (Look > Glass effects > Reduced) on slower phones. */
+body.clean:not(.noglass) {
+  --pill-bg: linear-gradient(150deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.05) 52%, rgba(255, 255, 255, 0.13)), rgba(22, 18, 44, 0.36);
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.6), inset 0 -1px 1px rgba(255, 255, 255, 0.18), inset 0 0 16px rgba(255, 255, 255, 0.07), 0 8px 24px rgba(0, 0, 0, 0.34);
+}
+body.clean:not(.noglass) .tbPill, body.clean:not(.noglass) #dock button, body.clean:not(.noglass) #chip, body.clean:not(.noglass) #toast {
+  -webkit-backdrop-filter: blur(16px) saturate(1.8); backdrop-filter: blur(16px) saturate(1.8);
+  border: 1px solid rgba(255, 255, 255, 0.28); box-shadow: var(--glass-edge); position: relative; overflow: hidden;
+}
+body.clean:not(.noglass) #toast { position: fixed; background: var(--pill-bg); }
+body.clean:not(.noglass) .tbPill::after, body.clean:not(.noglass) #dock button::after, body.clean:not(.noglass) #chip::after, body.clean:not(.noglass) #toast::after {
+  content: ''; position: absolute; left: 8%; right: 8%; top: 1px; height: 46%; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0));
+}
+body.clean:not(.noglass) #dock button::before { position: relative; z-index: 1; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.35); }
+body.clean:not(.noglass) #actions > button { position: relative; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.5) !important; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), inset 0 -3px 8px rgba(0, 0, 0, 0.16), 0 6px 18px rgba(0, 0, 0, 0.38); }
+body.clean:not(.noglass) #actions > button::after { content: ''; position: absolute; left: 10%; right: 10%; top: 1px; height: 45%; border-radius: 19px; pointer-events: none; background: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0)); }
+/* panels and sheets */
+body.clean:not(.noglass) .panel, body.clean:not(.noglass) #hud, body.clean:not(.noglass) #sheet, body.clean:not(.noglass) #journal {
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.04) 45%, rgba(255, 255, 255, 0.1)), rgba(24, 18, 46, 0.62) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(1.7); backdrop-filter: blur(22px) saturate(1.7);
+  border: 1px solid rgba(255, 255, 255, 0.24) !important; box-shadow: var(--glass-edge) !important;
+}
+body.clean:not(.noglass) .catCard, body.clean:not(.noglass) .catChip, body.clean:not(.noglass) .catSelect, body.clean:not(.noglass) .catToggle {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04)) !important; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+body.clean:not(.noglass) .catChip.on, body.clean:not(.noglass) .catCard.on, body.clean:not(.noglass) .catToggle.on { background: linear-gradient(160deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0.12)) !important; border-color: rgba(255, 255, 255, 0.6); }
+/* the phone */
+body.clean:not(.noglass) #phoneFrame { background: linear-gradient(145deg, #3b4156, #0c0c12 38%, #20233a 62%, #07070b); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22), inset 0 2px 3px rgba(255, 255, 255, 0.35), 0 18px 60px rgba(0, 0, 0, 0.65), 0 0 40px rgba(80, 130, 255, 0.18); }
+.app .ico { border: 1px solid rgba(255, 255, 255, 0.4); overflow: hidden; box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.75), inset 0 -8px 12px rgba(0, 0, 0, 0.2), 0 8px 16px rgba(0, 0, 0, 0.38); }
+.app .ico::after { content: ''; position: absolute; left: 7%; right: 7%; top: 2px; height: 46%; border-radius: 16px 16px 40% 40%; pointer-events: none; background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.04)); }
+.app .lbl { background: none; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.75); font-weight: 600; }
+#phoneSearch, #nightBtn { -webkit-backdrop-filter: blur(14px) saturate(1.6); backdrop-filter: blur(14px) saturate(1.6); border: 1px solid rgba(255, 255, 255, 0.3); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5); background: linear-gradient(160deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.08)); }
+#phoneClose2 { background: linear-gradient(160deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.7)); box-shadow: inset 0 1px 0 #fff, 0 4px 12px rgba(0, 0, 0, 0.3); }
+#phoneClock { text-shadow: 0 2px 14px rgba(0, 0, 0, 0.45); }
+/* wallpaper gallery inside the phone */
+#wallPanel { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; padding: 56px 16px 16px; box-sizing: border-box; background: linear-gradient(160deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04)), rgba(10, 10, 24, 0.72); -webkit-backdrop-filter: blur(24px) saturate(1.6); backdrop-filter: blur(24px) saturate(1.6); }
+#wallPanel[hidden] { display: none; }
+#wallPanel .wallHead { display: flex; justify-content: space-between; align-items: center; font-size: 20px; font-weight: 700; margin-bottom: 12px; }
+#wallDone { height: 34px; padding: 0 16px; border-radius: 17px; border: 1px solid rgba(255, 255, 255, 0.4); background: rgba(255, 255, 255, 0.2); color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+#wallGrid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; align-content: start; }
+.wallTile { position: relative; aspect-ratio: 9 / 16; border-radius: 16px; border: 2px solid rgba(255, 255, 255, 0.25); background: #1a1a2a center / cover no-repeat; color: #fff; font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; padding: 0; overflow: hidden; }
+.wallTile span { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 4px 6px; background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.7)); text-align: center; }
+.wallTile.on { border-color: #fff; box-shadow: 0 0 0 2px rgba(120, 170, 255, 0.9), 0 0 18px rgba(120, 170, 255, 0.6); }
+.wallTile.mine { display: flex; align-items: center; justify-content: center; text-align: center; border-style: dashed; }
+.wallTile.mine span { position: static; background: none; padding: 6px; font-size: 12px; }
+
+/* ---- The character editor ---- */
+#creator { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: #1c1920; color: #fff; font-family: inherit; }
+#creator .crTop { position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 0; pointer-events: none; }
+#creator .crTop > * { pointer-events: auto; }
+#creator .crTitle { font-weight: 700; opacity: .85; }
+#creator .crX { width: 40px; height: 40px; border-radius: 50%; border: 0; font-size: 26px; line-height: 1; background: rgba(255,255,255,.14); color: #fff; }
+#creator .crSave { border: 0; border-radius: 999px; padding: 10px 22px; font-weight: 700; background: #fff; color: #111; }
+#creator .crStage { position: relative; flex: 1 1 auto; min-height: 0; }
+#creator canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+#creator .crHint { position: absolute; top: 62px; left: 0; right: 0; text-align: center; font-size: 12px; opacity: .55; pointer-events: none; }
+#creator .crHist { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 8px; }
+#creator .crHist button { width: 40px; height: 40px; border-radius: 50%; border: 0; font-size: 20px; background: rgba(255,255,255,.14); color: #fff; }
+#creator .crHist button:disabled { opacity: .3; }
+#creator .crSheet { flex: 0 0 auto; height: min(44vh, 360px); background: #0d0c10; border-radius: 18px 18px 0 0; display: flex; flex-direction: column; }
+#creator .crTabs { display: flex; overflow-x: auto; gap: 4px; padding: 10px 8px 4px; border-bottom: 1px solid rgba(255,255,255,.08); scrollbar-width: none; }
+#creator .crTab { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 64px; padding: 6px 8px; border: 0; border-bottom: 3px solid transparent; background: none; color: rgba(255,255,255,.6); font-size: 11px; }
+#creator .crTab .crIc { font-size: 22px; }
+#creator .crTab.on { color: #fff; border-bottom-color: #fff; }
+#creator .crGrid { flex: 1 1 auto; overflow-y: auto; padding: 14px 12px 18px; display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 10px; align-content: start; }
+#creator .crOpt { border: 2px solid transparent; border-radius: 14px; background: #2a2830; color: #fff; padding: 10px 6px; display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 72px; justify-content: center; }
+#creator .crOpt.on { border-color: #4da3ff; }
+#creator .crOpt .crBig { font-size: 34px; }
+#creator .crOpt em { font-style: normal; font-size: 12px; }
+#creator .crOpt.dotOpt { background: none; padding: 2px; min-height: 0; aspect-ratio: 1; }
+#creator .crOpt.dotOpt span { width: 100%; height: 100%; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
+#creator .crSoon { grid-column: 1 / -1; text-align: center; color: rgba(255,255,255,.55); padding: 28px 12px; font-size: 14px; }
+@media (min-width: 800px) { #creator { flex-direction: row; } #creator .crStage { flex: 1 1 55%; } #creator .crSheet { height: auto; flex: 0 0 420px; border-radius: 0; } }

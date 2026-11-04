@@ -40,6 +40,23 @@ export function initLook(socket, onApply = () => {}) {
       accents.append(s);
     }
 
+    // Liquid glass or reduced (flat, lighter on slow phones). Remembered on this device.
+    const glass = $('lookGlass');
+    if (glass) {
+      glass.replaceChildren();
+      const reduced = document.body.classList.contains('noglass');
+      for (const [id, text] of [['full', 'Liquid glass'], ['reduced', 'Reduced']]) {
+        const b = el('button', 'pbtn' + ((id === 'reduced') === reduced ? ' on' : ''), text);
+        b.dataset.glass = id;
+        b.addEventListener('click', () => {
+          document.body.classList.toggle('noglass', id === 'reduced');
+          try { localStorage.setItem('adulthood.glass', id); } catch { /* fine */ }
+          render();
+        });
+        glass.append(b);
+      }
+    }
+
     const sizes = $('lookSizes');
     sizes.replaceChildren();
     for (const size of SIZES) {

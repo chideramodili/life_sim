@@ -9,6 +9,11 @@ import { captureRig, poseStand, poseSit } from './rig.js';
 
 const BODIES = ['man', 'woman', 'elder', 'baby'];
 const url = (b) => `/models/people/${b}-lite.glb`;
+// Workers with their own uniform: chef and police are rigged (walk, run); doctor and nurse come as still figures.
+const WORKERS = { chef: true, police: true, doctor: false, nurse: false };
+const workerHeight = { chef: 1.78, police: 1.82, doctor: 1.8, nurse: 1.68 };
+const wfactor = {};
+const ARM_DOWN = 1.25, AXIS_Z = new THREE.Vector3(0, 0, 1);
 const HEIGHT = 1.75;   // metres for the man; the others keep their size relative to him
 let ready = false, loading = null, factor = 1;
 const gltfs = {};
@@ -24,7 +29,13 @@ const pick = (h, w) => { let r = (h % 1000) / 1000, i = 0; for (; i < w.length -
 
 export function loadNpc() {
   if (!loading) {
-    loading = Promise.all(BODIES.map((b) => new GLTFLoader().loadAsync(url(b)).then((g) => { gltfs[b] = g; }))).then(() => {
+    const workerLoads = Object.keys(WORKERS).map((w) => new GLTFLoader().loadAsync(`/models/workers/${w}.glb`).then((g) => {
+      g.scene.updateMatrixWorld(true);
+      const b = new THREE.Box3().setFromObject(g.scene, true);
+      wfactor[w] = workerHeight[w] / Math.max(0.01, b.max.y - b.min.y);
+      gltfs[w] = g;
+    }).catch(() => { /* that worker shows as an ordinary person */ }));
+    loading = Promise.all([...BODIES.map((b) => new GLTFLoader().loadAsync(url(b)).then((g) => { gltfs[b] = g; })), ...workerLoads]).then(() => {
       const man = gltfs.man.scene;
       man.updateMatrixWorld(true);
       const bb = new THREE.Box3().setFromObject(man, true);
@@ -50,12 +61,14 @@ function material(body, tint, base) {
 export function upgradeToNpc(group, look = {}) {
   if (!ready || group.userData.npc) return;
   const h = hash([look.skin, look.top, look.bottom, look.shoes].join('|'));
-  const body = BODIES.includes(look.body) ? look.body : ['man', 'woman', 'elder'][pick(h >>> 3, [0.42, 0.42, 0.16])];
+  const worker = look.worker && gltfs[look.worker] ? look.worker : null;
+  const body = worker || (BODIES.includes(look.body) ? look.body : ['man', 'woman', 'elder'][pick(h >>> 3, [0.42, 0.42, 0.16])]);
   const tint = Number.isInteger(look.tone) ? look.tone : pick(h >>> 7, TINT_W);
   const g = gltfs[body];
   const root = clone(g.scene);
-  root.scale.setScalar(factor);
-  root.traverse((o) => { if (o.isMesh) { o.material = material(body, tint, o.material); o.frustumCulled = false; } });
+  root.scale.setScalar(worker ? wfactor[worker] : factor);
+  // Workers keep their uniform colours; everyone else gets a skin tone.
+  root.traverse((o) => { if (o.isMesh) { if (!worker) o.material = material(body, tint, o.material); o.frustumCulled = false; } });
   root.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(root, true);
   root.position.y -= bb.min.y;
@@ -65,14 +78,28 @@ export function upgradeToNpc(group, look = {}) {
   const walk = THREE.AnimationClip.findByName(g.animations, 'walk');
   const action = walk ? mixer.clipAction(walk) : null;
   if (action) { action.play(); action.time = Math.random() * walk.duration; }
-  const rig = captureRig(root);
-  group.userData.npc = { root, mixer, action, rig, bones: rig.bones, b: 1, phase: Math.random() * 6, seated: false, body };
+  if (worker && WORKERS[worker]) {
+    // The uniform models rest in a T-pose; swing each upper arm down about the front-to-back axis so they stand like everyone else.
+    root.updateMatrixWorld(true);
+    const qp = new THREE.Quaternion(), qr = new THREE.Quaternion(), qa = new THREE.Quaternion();
+    root.traverse((o) => {
+      if (!o.isBone || !/^(Left|Right)Arm$/.test(o.name)) return;
+      o.parent.getWorldQuaternion(qp);
+      const ang = (o.name[0] === 'L' ? -1 : 1) * ARM_DOWN;
+      qr.setFromAxisAngle(AXIS_Z, ang);
+      qa.copy(qp).invert().multiply(qr).multiply(qp).multiply(o.quaternion);
+      o.quaternion.copy(qa);
+    });
+  }
+  const rig = worker && !WORKERS[worker] ? null : captureRig(root);   // still figures have no skeleton to pose
+  group.userData.npc = { root, mixer, action, rig, bones: rig ? rig.bones : {}, b: 1, phase: Math.random() * 6, seated: false, body };
 }
 
 // Every frame: walk when moving (speed in m/s), stand when not.
 export function moveNpc(group, dt, speed) {
   const M = group.userData.npc;
   if (!M) return;
+  if (!M.rig) return;
   if (M.seated) { poseSit(M.rig, group, M.drop, M.lean); return; }
   const target = speed > 0.3 ? 0 : 1;
   M.b += (target - M.b) * Math.min(1, dt * 8);
@@ -87,7 +114,7 @@ export function moveNpc(group, dt, speed) {
 // Sit this person down (a passenger in a bus, train or plane). The pose is applied every frame by moveNpc, and once now.
 export function seatNpc(group, { drop = 0.45, lean = 0 } = {}) {
   const M = group.userData.npc;
-  if (!M || M.seated) return;
+  if (!M || M.seated || !M.rig) return;
   M.seated = true; M.drop = drop; M.lean = lean;
   if (M.action) M.action.stop();
   poseSit(M.rig, group, drop, lean);

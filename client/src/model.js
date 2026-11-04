@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
-import { captureRig, poseStand, poseSit, poseExercise, exerciseTilt } from './rig.js';
+import { captureRig, poseStand, poseSit, poseExercise, exerciseTilt, poseReach } from './rig.js';
 
 const BODIES = ['man', 'woman'];
 const HEIGHT = 1.75;   // metres for the man; the woman keeps her size relative to him
@@ -30,6 +30,97 @@ export function loadModel() {
 }
 export const modelReady = () => ready;
 export const whenModelReady = (fn) => { if (ready) fn(); else waiting.add(fn); };
+
+// The character's looks. Skin, hair and eyes are all painted into the body texture, so each combination is baked onto a copy of
+// that texture (shared by everyone with the same body and choices). The original look (skin 0, brown hair, brown eyes) needs no copy.
+//  - skin: pixels that are skin coloured get a tint; hair and brows: dark brown pixels are recoloured keeping their shading;
+//  - eyes: the iris discs, measured on the textures (one entry per visible iris).
+export const EYE_COLOURS = { brown: null, hazel: '#9a7b2f', green: '#3f8f4f', blue: '#3a7bd5', grey: '#8d9aa6', amber: '#c9822b' };
+export const HAIR_COLOURS = { brown: null, black: '#2a2523', chestnut: '#7a4a2a', auburn: '#8a3a22', ginger: '#c0592a', blonde: '#cfa75a', grey: '#8f8f93', white: '#d8d6d0' };
+// 12 skin tones: 0 is the model's own, then light to deep (multiplied onto the skin pixels).
+export const SKIN_TONES = [[1, 1, 1], [1.04, 0.99, 0.97], [0.97, 0.9, 0.82], [0.9, 0.78, 0.66], [0.82, 0.68, 0.55], [0.74, 0.58, 0.46], [0.66, 0.5, 0.39], [0.58, 0.43, 0.33], [0.5, 0.36, 0.28], [0.43, 0.3, 0.23], [0.36, 0.25, 0.2], [0.3, 0.2, 0.16]];
+const IRIS = {
+  man:   [[658, 868, 4.6], [705, 857, 3.6]],
+  woman: [[734.5, 849, 5.2], [211, 961, 5.6]],
+};
+const bakes = {};
+// Hue (degrees), HSV saturation and value. Skin sits at roughly 0-30 degrees; the beige and grey clothes sit above that.
+function rgb2hsv(r, g, b) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  if (!d) return [0, 0, mx];
+  const h = mx === r ? ((g - b) / d + (g < b ? 6 : 0)) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, d / mx, mx];
+}
+function bakeTexture(body, look, src) {
+  const key = `${body}:${look.skin}:${look.hair}:${look.eyes}`;
+  if (bakes[key]) return bakes[key];
+  const img = src.image;
+  const W = img.width || 1024, k = W / 1024;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = img.height || W;
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, cv.width, cv.height);
+  if (look.skin || look.hair !== 'brown') {
+    const all = ctx.getImageData(0, 0, cv.width, cv.height), d = all.data;
+    const st = SKIN_TONES[look.skin], hc = HAIR_COLOURS[look.hair] ? new THREE.Color(HAIR_COLOURS[look.hair]) : null;
+    for (let i = 0; i < d.length; i += 4) {
+      const R = d[i] / 255, G = d[i + 1] / 255, B = d[i + 2] / 255;
+      const [h, s, v] = rgb2hsv(R, G, B);
+      const warm = h <= 30 || h >= 345;
+      if (!warm) continue;                    // blue/grey/beige clothes, eyes and so on
+      if (v > 0.42 && s > 0.2 && look.skin) {   // skin
+        d[i] = Math.min(255, d[i] * st[0]); d[i + 1] = Math.min(255, d[i + 1] * st[1]); d[i + 2] = Math.min(255, d[i + 2] * st[2]);
+      } else if (v > 0.1 && v <= 0.42 && s > 0.3 && hc) {   // hair, brows, lashes
+        const f = Math.max(0.5, Math.min(2.2, v / 0.29)) * 255;
+        d[i] = Math.min(255, hc.r * f); d[i + 1] = Math.min(255, hc.g * f); d[i + 2] = Math.min(255, hc.b * f);
+      }
+    }
+    ctx.putImageData(all, 0, 0);
+  }
+  if (look.eyes !== 'brown') {
+    const t = new THREE.Color(EYE_COLOURS[look.eyes]);
+    for (const [cx, cy, r] of IRIS[body]) {
+      const x0 = Math.floor((cx - r - 1) * k), y0 = Math.floor((cy - r - 1) * k), n = Math.ceil((2 * r + 3) * k);
+      const d = ctx.getImageData(x0, y0, n, n);
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+        const dist = Math.hypot((x0 + i + 0.5) / k - cx, (y0 + j + 0.5) / k - cy);
+        if (dist > r) continue;
+        const o = (j * n + i) * 4, R = d.data[o], G = d.data[o + 1], B = d.data[o + 2];
+        const lum = (0.299 * R + 0.587 * G + 0.114 * B) / 255;
+        if (lum < 0.1 || lum > 0.8) continue;   // keep the pupil and the white highlights
+        const edge = Math.min(1, (r - dist) / 1.2);   // soft edge so no ring shows
+        const f = (0.8 + 1.2 * Math.min(lum, 0.6)) * 255;
+        d.data[o]     = R + (Math.min(255, t.r * f) - R) * edge;
+        d.data[o + 1] = G + (Math.min(255, t.g * f) - G) * edge;
+        d.data[o + 2] = B + (Math.min(255, t.b * f) - B) * edge;
+      }
+      ctx.putImageData(d, x0, y0);
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.flipY = src.flipY; tex.colorSpace = src.colorSpace; tex.wrapS = src.wrapS; tex.wrapT = src.wrapT;
+  tex.anisotropy = src.anisotropy; tex.channel = src.channel;
+  return (bakes[key] = tex);
+}
+// Give this person their looks: { eyes, skin, hair }. Safe to call every frame: it only works when something changed.
+export function applyLook(group, look = {}) {
+  const eyes = Object.hasOwn(EYE_COLOURS, look.eyes) ? look.eyes : 'brown';
+  const hair = Object.hasOwn(HAIR_COLOURS, look.hair) ? look.hair : 'brown';
+  const skin = Number.isInteger(look.skin) && look.skin >= 0 && look.skin < SKIN_TONES.length ? look.skin : 0;
+  const L = { eyes, hair, skin }, id = `${eyes}|${hair}|${skin}`;
+  const M = group.userData.model;
+  group.userData.lookWant = L;
+  if (!M || M.lookId === id) return;
+  M.lookId = id;
+  M.root.traverse((o) => {
+    if (!o.isMesh || !o.material) return;
+    if (!o.userData.origMap) o.userData.origMap = o.material.map;
+    const src = o.userData.origMap;
+    if (!src || !src.image) return;
+    o.material.map = id === 'brown|brown|0' ? src : bakeTexture(M.body, L, src);
+    o.material.needsUpdate = true;
+  });
+}
 
 const mat = (c) => new THREE.MeshStandardMaterial({ color: c });
 
@@ -63,6 +154,7 @@ export function attachModel(group, body = 'man') {
   const rig = captureRig(root);
   group.userData.model = { root, mixer, actions, cur: 'idle', rig, bones: rig.bones, extras: [], heading: 0, b: 1, body, phase: Math.random() * 6 };
   group.userData.lookKey = null; // dress again
+  if (group.userData.lookWant) applyLook(group, group.userData.lookWant);
 }
 
 function detachModel(group) {
@@ -109,6 +201,7 @@ export function animateModel(group, dt, speed, heading, working, t, sitting = fa
   if (exercise && !sitting) {
     for (const a of Object.values(M.actions)) a.setEffectiveWeight(0);
     M.mixer.update(dt);
+    if (exercise === 9) M.root.rotation.y += (0 - M.root.rotation.y) * Math.min(1, dt * 10);   // lie along the bed
     const tl = exerciseTilt(exercise, t);
     M.root.rotation.x += (tl.x - M.root.rotation.x) * Math.min(1, dt * 8);
     M.root.position.y += (tl.y - M.root.position.y) * Math.min(1, dt * 8);
@@ -147,4 +240,7 @@ export function animateModel(group, dt, speed, heading, working, t, sitting = fa
     M.root.rotation.y += d * Math.min(1, dt * 10);
   }
   poseStand(M.rig, t, M.b, working && M.b > 0.5, M.phase);
+  // Reaching for a door handle (set by the street view while you are right at a door).
+  const rw = group.userData.reach || 0;
+  if (rw > 0.02) poseReach(M.rig, rw);
 }

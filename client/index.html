@@ -429,13 +429,16 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
   <div id="lookPanel" class="panel" hidden>
     <div class="sheetHead"><span>Look</span><button id="lookClose" class="closeX" aria-label="Close look settings">×</button></div>
     <div class="jlabel">Your character</div>
-    <div id="lookBody" class="swrow"><button class="pbtn" data-body="man" type="button">Man</button><button class="pbtn" data-body="woman" type="button">Woman</button></div>
+    <button id="lookEdit" class="mini" type="button">Edit my character</button>
+    <div class="fine">Body, skin, hair colour and eye colour.</div>
     <div class="jlabel">Style</div>
     <div id="lookPresets" class="swrow"></div>
     <div class="jlabel">Accent color</div>
     <div id="lookAccents" class="swrow"></div>
     <div class="jlabel">Text size</div>
     <div id="lookSizes" class="swrow"></div>
+    <div class="jlabel">Glass effects</div>
+    <div id="lookGlass" class="swrow"></div>
     <button id="lookReset" class="mini" style="margin-top:14px;">Reset to Sunset</button>
     <div class="fine">Your look is saved to your account.</div>
   </div>
@@ -648,8 +651,9 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
   <div id="auth" class="panel" hidden>
     <div id="logoAuth" class="brand"></div>
     <div class="sub">Log in, or create an account</div>
-    <div class="jlabel" style="margin-top:6px">New here? Choose your character</div>
-    <div class="swrow" id="authBody"><button class="pbtn on" data-body="man" type="button">Man</button><button class="pbtn" data-body="woman" type="button">Woman</button></div>
+    <div class="jlabel" style="margin-top:6px">New here? Make your character</div>
+    <button id="authChar" class="alt" type="button">Create your character</button>
+    <div id="authCharSum" class="fine"></div>
     <input id="user" class="field" placeholder="Username" autocomplete="username" maxlength="16" />
     <input id="pass" class="field" type="password" placeholder="Password (8 or more characters)" autocomplete="current-password" maxlength="100" />
     <div id="authError" class="err"></div>

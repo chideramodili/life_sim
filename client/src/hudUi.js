@@ -7,6 +7,7 @@
 //  - the Phone opens a full home screen with apps, search and a Night mode switch
 // Every original button keeps its id and its listeners, so the rest of the game does not know anything changed.
 import './hud.css';
+import { applyWall, createWallPicker } from './wallpaper.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -34,6 +35,7 @@ export const APPS = [
   { id: 'jobs', label: 'Jobs', icon: '💼', bg: 'linear-gradient(145deg,#34c98a,#12865a)', click: 'jobsBtn', need: 'Visit the Jobs Center to see the jobs board.' },
   { id: 'photos', label: 'Camera', icon: '📷', bg: 'linear-gradient(145deg,#6f7787,#3b4150)', click: 'photoBtn', need: 'This phone has no camera. Buy one with a camera at the Shop.' },
   { id: 'games', label: 'Games', icon: '🎮', bg: 'linear-gradient(145deg,#2fcf9a,#0d7f64)', isNew: true, say: 'Stand next to another player, then tap 🎮 Play.' },
+  { id: 'wall', label: 'Wallpaper', icon: '🖼️', bg: 'linear-gradient(145deg,#6fa8ff,#7a5cff)', wall: true },
   { id: 'radio', label: 'Radio', icon: '📻', bg: 'linear-gradient(145deg,#ff7a6b,#d6343d)', isNew: true, soon: true, say: 'Radio is coming soon.' },
   { id: 'audiomack', label: 'Audiomack', icon: '🎵', bg: 'linear-gradient(145deg,#ffb52e,#d9801a)', soon: true, say: 'Music apps are coming soon.' },
   { id: 'spotify', label: 'Spotify', icon: '🎧', bg: 'linear-gradient(145deg,#4fd37c,#1a8f4a)', soon: true, say: 'Music apps are coming soon.' },
@@ -42,6 +44,7 @@ export const APPS = [
 
 export function initHud(socket, look) {
   document.body.classList.add('clean');
+  try { if (localStorage.getItem('adulthood.glass') === 'reduced') document.body.classList.add('noglass'); } catch { /* glass stays on */ }
   const hudEl = $('hud');
   hudEl.classList.remove('compact');
 
@@ -208,6 +211,8 @@ export function initHud(socket, look) {
   const homeBar = el('div');
   homeBar.id = 'phoneBar';
   screen.append(notch, status, clock, date, night, search, grid, homeBar);
+  const wallPicker = createWallPicker(screen, { onChange: () => applyWall(screen), toast });
+  applyWall(screen);
   frame.append(screen, closeBtn);
   wrap.append(frame);
   document.body.append(wrap);
@@ -234,6 +239,7 @@ export function initHud(socket, look) {
   }
 
   function runApp(app) {
+    if (app.wall) return wallPicker.open();
     const target = app.click ? $(app.click) : null;
     if (app.click && !app.force && (!target || target.hidden)) {
       if (app.need) return toast(app.need);
@@ -270,6 +276,7 @@ export function initHud(socket, look) {
     wrap.hidden = false;
   }
   function closePhone() {
+    wallPicker.close();
     wrap.hidden = true;
   }
   closeBtn.addEventListener('click', closePhone);

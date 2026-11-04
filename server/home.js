@@ -20,8 +20,9 @@ export const GROUPS = {
     ['mat_foam',    'Foam mat',                  12000,  { sleep: 4,  style: 1,  color: '#d8c9a0' }],
     ['mattress',    'Spring mattress',           25000,  { sleep: 8,  style: 2,  color: '#e8e0d0' }],
     ['mat_ortho',   'Orthopedic mattress',       45000,  { sleep: 11, style: 3,  color: '#cfe0ea' }],
-    ['bed_frame',   'Wooden bed frame',          70000,  { sleep: 15, style: 6,  color: '#6d8fc0', frame: '#8a5a35' }],
-    ['bed_queen',   'Queen bed, padded headboard', 140000, { sleep: 19, style: 9,  color: '#b98aa8', frame: '#5b3d2a' }],
+    ['bed_frame',   'Iron bed frame',            70000,  { sleep: 15, style: 6,  color: '#6d8fc0', frame: '#8a5a35', glb: 'old-iron-bed', size: [1, 2] }],
+    ['bed_queen',   'Queen bed, padded headboard', 140000, { sleep: 19, style: 9,  color: '#b98aa8', frame: '#5b3d2a', glb: 'bed', size: [2, 2] }],
+    ['bed_hospital', 'Adjustable hospital bed',  210000, { sleep: 21, style: 8,  glb: 'hospital-bed', size: [2, 1] }],
     ['bed_king',    'King bed, leather headboard', 280000, { sleep: 24, style: 14, color: '#2f3b52', frame: '#2a1d16', size: [2, 2] }],
   ] },
   tv: { label: 'TVs', size: [1, 1], slot: 'tv', cap: 2, items: [
@@ -35,6 +36,7 @@ export const GROUPS = {
   fridge: { label: 'Fridges', size: [1, 1], slot: 'fridge', cap: 2, items: [
     ['fridge_mini', 'Mini fridge',               30000,  { eat: 5,  style: 2,  color: '#cfd6dc' }],
     ['fridge',      'Fridge',                    55000,  { eat: 8,  style: 3,  color: '#dfe5ea' }],
+    ['fridge_chest', 'Chest freezer',            85000,  { eat: 10, style: 3,  glb: 'freezer-chest', size: [2, 1] }],
     ['fridge_double', 'Double-door fridge',      110000, { eat: 12, style: 5,  color: '#b9c3cc', size: [2, 1] }],
     ['fridge_smart', 'Smart fridge-freezer',     230000, { eat: 16, style: 8,  color: '#2b2f36', size: [2, 1] }],
   ] },
@@ -51,9 +53,9 @@ export const GROUPS = {
   ] },
   sofa: { label: 'Sofas and seats', size: [2, 1], cap: 6, items: [
     ['bench',       'Wooden bench',              15000,  { style: 3, max: 2, color: '#a07046', size: [2, 1] }],
-    ['sofa',        'Fabric sofa',               45000,  { style: 8, max: 2, color: '#7a4f9a' }],
+    ['sofa',        'Fabric sofa',               45000,  { style: 8, max: 2, color: '#7a4f9a', glb: 'sofa', size: [2, 1] }],
     ['sofa_leather', 'Leather sofa',             120000, { style: 14, max: 2, color: '#6b3a24' }],
-    ['sofa_sect',   'Sectional sofa',            260000, { style: 22, max: 1, color: '#35507a', size: [3, 1] }],
+    ['sofa_sect',   'Sectional sofa',            260000, { style: 22, max: 1, color: '#35507a', glb: 'corner-sofa', size: [3, 2] }],
   ] },
   rug: { label: 'Rugs', size: [2, 2], flat: true, cap: 4, items: [
     ['rug_mat',     'Plastic floor mat',         4000,   { style: 2, max: 2, color: '#6fa3a8' }],
@@ -86,6 +88,33 @@ export const GROUPS = {
     ['shelf_glass', 'Glass display cabinet',     90000,  { style: 11, max: 2 }],
     ['shelf_library', 'Built-in library wall',   240000, { style: 18, max: 1, size: [3, 1] }],
   ] },
+  seat: { label: 'Chairs and seats', size: [1, 1], cap: 10, items: [
+    ['school_chair', 'Stackable school chair',   6000,   { style: 1, max: 4, glb: 'stackable-school-chair' }],
+    ['pouf',         'Pink pouf',                14000,  { style: 3, max: 4, glb: 'pouf' }],
+    ['office_chair', 'Office chair',             38000,  { style: 5, max: 2, glb: 'office-chair' }],
+    ['armchair',     'Round armchair',           55000,  { style: 8, max: 3, glb: 'armchair' }],
+    ['gaming_chair', 'Gaming chair',             85000,  { style: 9, max: 2, glb: 'gaming-chair' }],
+  ] },
+  bath: { label: 'Bathroom', size: [1, 1], cap: 8, items: [
+    ['tp_holder',    'Toilet roll holder',       1500,   { style: 1, max: 2, glb: 'toilet-paper-holder', lift: 0.9 }],
+    ['med_cabinet',  'Medicine cabinet',         32000,  { style: 4, max: 1, glb: 'medicine-cabinet', lift: 1.1 }],
+    ['toilet',       'Toilet',                   45000,  { style: 3, max: 1, glb: 'toilet' }],
+    ['bidet',        'Bidet',                    60000,  { style: 4, max: 1, glb: 'bidet' }],
+    ['hot_tub',      'Wooden hot tub',           650000, { style: 24, max: 1, glb: 'hot-tub', size: [3, 3] }],
+  ] },
+  decor: { label: 'Decor and storage', size: [1, 1], cap: 10, items: [
+    ['curtains',     'Green curtains',           22000,  { style: 5, max: 2, glb: 'curtains', size: [2, 1], lift: 0.5 }],
+    ['door',         'Interior door',            30000,  { style: 3, max: 2, glb: 'door' }],
+    ['xmas_tree',    'Christmas tree',           38000,  { style: 7, max: 1, glb: 'christmas-tree', size: [2, 2] }],
+    ['vanity',       'Vanity table with mirror', 48000,  { style: 6, max: 1, glb: 'vanity-table' }],
+    ['wardrobe',     'Old painted wardrobe',     85000,  { style: 8, max: 2, glb: 'old-wardrobe', size: [2, 1] }],
+    ['patio_set',    'Patio table and chairs',   130000, { style: 11, max: 1, glb: 'patio-set', size: [2, 2] }],
+  ] },
+  pro: { label: 'Shop and clinic', size: [1, 1], cap: 6, items: [
+    ['grocery_shelf', 'Grocery shelf',           70000,  { style: 4, max: 2, glb: 'grocery-shelf', size: [2, 1] }],
+    ['reception',    'Curved reception desk',    150000, { style: 8, max: 1, glb: 'reception-desk', size: [2, 1] }],
+    ['op_table',     'Operating table',          400000, { style: 6, max: 1, glb: 'operating-table', size: [2, 2] }],
+  ] },
 };
 export const GROUP_IDS = Object.keys(GROUPS);
 export const TIER_NAMES = ['Basic', 'Standard', 'Good', 'Premium', 'Luxury', 'Elite'];
@@ -110,7 +139,7 @@ for (const [gid, g] of Object.entries(GROUPS)) {
     const item = {
       id, label, cost, group: gid, tier: i, tiers: g.items.length,
       size: x.size || g.size, max: x.max || 1, style: x.style || 0, slot: g.slot || null, flat: Boolean(g.flat),
-      color: x.color || null, frame: x.frame || null,
+      color: x.color || null, frame: x.frame || null, glb: x.glb || null, lift: x.lift || 0,
       sleep: x.sleep || 0, fun: x.fun || 0, eat: x.eat || 0, course: x.course || 0, cool: x.cool || 0, calm: x.calm || 0, lamp: Boolean(x.lamp),
     };
     item.text = describe(item);
@@ -324,7 +353,7 @@ export function homeInfo(home, where) {
     groups: GROUP_IDS.map((id) => ({ id, label: GROUPS[id].label, cap: GROUPS[id].cap })),
     catalog: ITEM_IDS.map((id) => {
       const c = CATALOG[id];
-      return { id, label: c.label, cost: c.cost, size: c.size, max: c.max, text: c.text, style: c.style, flat: c.flat, group: c.group, tier: c.tier, tierLabel: TIER_NAMES[Math.min(TIER_NAMES.length - 1, Math.round((c.tier / Math.max(1, c.tiers - 1)) * (TIER_NAMES.length - 1)))], color: c.color, frame: c.frame, lamp: c.lamp };
+      return { id, label: c.label, cost: c.cost, size: c.size, max: c.max, text: c.text, style: c.style, flat: c.flat, group: c.group, tier: c.tier, tierLabel: TIER_NAMES[Math.min(TIER_NAMES.length - 1, Math.round((c.tier / Math.max(1, c.tiers - 1)) * (TIER_NAMES.length - 1)))], color: c.color, frame: c.frame, lamp: c.lamp, glb: c.glb, lift: c.lift };
     }),
     walls: Object.entries(WALLS).map(([id, color]) => ({ id, color })),
     floors: Object.entries(FLOORS).map(([id, color]) => ({ id, color })),

@@ -463,6 +463,10 @@ export function createInterior(scene) {
     return { grp, legs, armL, armR, head, torso };
   }
 
+  let roomOpenForVisits = true;
+  // Staff who wear their own uniform, in the order of the staff spots above.
+  const WORKERS_AT = { hospital: ['doctor', 'nurse'], pharmacy: ['nurse'], police: ['police', 'police'], biz_cafe: ['chef', 'chef', 'chef', 'chef'] };
+
   function addFigures(g, theme, id, bizStaff) {
     const r = rnd(hash(id));
     const spots = {
@@ -478,16 +482,25 @@ export function createInterior(scene) {
       const s = spots.staff[i % Math.max(1, spots.staff.length)];
       if (!s) return;
       const f = person(g, c, hash(id) + i, 'staff');
+      const wk = (WORKERS_AT[id] || [])[i];
+      if (wk) f.grp.userData.look.worker = wk;
       f.grp.position.set(s[0], 0, s[1]);
       f.grp.rotation.y = s[1] > 3 || id === 'club' ? Math.PI : 0;
       figures.push({ ...f, kind: 'idle', phase: r() * 6 });
     });
+    if (id === 'hospital') {
+      // A patient resting in the second bed.
+      const f = person(g, '#9fd0ea', hash(id) + 99, 'guest');
+      f.grp.position.set(-4.5, 0.98, -5.9);
+      f.grp.rotation.x = -Math.PI / 2;
+      figures.push({ ...f, kind: 'patient', phase: 1 });
+    }
     for (let i = 0; i < theme.crowd; i++) {
       const f = person(g, null, hash(id) * 7 + i, 'guest');
       const x = (r() - 0.5) * 14;
       const z = -2 + r() * 8;
       f.grp.position.set(x, 0, z);
-      figures.push({ ...f, kind: i % 3 === 0 ? 'idle' : 'wander', phase: r() * 6, target: new THREE.Vector3(x, 0, z), wait: r() * 3, speed: 0.6 + r() * 0.5 });
+      figures.push({ ...f, kind: i % 3 === 0 ? 'idle' : 'wander', phase: r() * 6, target: new THREE.Vector3(x, 0, z), wait: r() * 3, speed: 0.6 + r() * 0.5, life: 20 + r() * 70 });
     }
     // When the light 3D person has loaded, staff and customers become people.
     const mine = figures.slice();
@@ -616,7 +629,7 @@ export function createInterior(scene) {
       if (roomId !== 'home') addFigures(people, theme, roomId, bizStaff);
     },
     // Closing time: customers (not staff) head for the door and leave.
-    closeUp() { for (const f of figures) if (f.target && (f.kind === 'wander' || f.kind === 'idle')) f.kind = 'leave'; },
+    closeUp() { roomOpenForVisits = false; for (const f of figures) { if (!f.target) continue; if (f.kind === 'away') f.kind = 'gone'; else if (['wander', 'idle', 'exit', 'enter'].includes(f.kind)) f.kind = 'leave'; } },
     // The floor space the props take up, as [x0, z0, x1, z1] boxes. Used once to build the server's furniture collision list.
     dumpSolids() {
       if (!propsGroup) return [];
@@ -641,10 +654,34 @@ export function createInterior(scene) {
       for (const f of figures) {
         f.phase += dt;
         const g = f.grp;
-        if (f.kind === 'leave') {
+        // Regular visitors: after a while a guest heads out, and a little later someone comes in through the door.
+        if (f.target && (f.kind === 'wander' || f.kind === 'idle')) { f.life -= dt; if (f.life <= 0 && roomOpenForVisits) f.kind = 'exit'; }
+        if (f.kind === 'away') {
+          f.back -= dt;
+          if (f.back <= 0) {
+            g.position.set((Math.random() - 0.5) * 1.2, 0, 9.4);
+            g.visible = true;
+            f.target.set((Math.random() - 0.5) * 14, 0, -2 + Math.random() * 9);
+            f.kind = 'enter'; f.life = 25 + Math.random() * 70; f.wait = 0;
+          }
+          continue;
+        }
+        if (f.kind === 'enter') {
+          const pos = g.position, dx = f.target.x - pos.x, dz = f.target.z - pos.z, dist = Math.hypot(dx, dz);
+          if (dist < 0.3) { f.kind = 'wander'; f.wait = 0.5; }
+          else {
+            const step = Math.min(dist, f.speed * 1.2 * dt);
+            pos.x += (dx / dist) * step; pos.z += (dz / dist) * step;
+            g.rotation.y = Math.atan2(dx, dz);
+            moveNpc(g, dt, f.speed * 1.2);
+            const sw = Math.sin(f.phase * 8) * 0.5; f.armL.rotation.x = sw; f.armR.rotation.x = -sw;
+          }
+          continue;
+        }
+        if (f.kind === 'leave' || f.kind === 'exit') {
           // closing time: walk to the door and go out
           const pos = g.position, dx = 0 - pos.x, dz = 9.6 - pos.z, dist = Math.hypot(dx, dz);
-          if (dist < 0.3) { g.visible = false; f.kind = 'gone'; }
+          if (dist < 0.3) { g.visible = false; if (f.kind === 'exit') { f.kind = 'away'; f.back = 4 + Math.random() * 14; } else f.kind = 'gone'; }
           else {
             const step = Math.min(dist, f.speed * 1.6 * dt);
             const nx = pos.x + (dx / dist) * step, nz = pos.z + (dz / dist) * step;
@@ -656,6 +693,7 @@ export function createInterior(scene) {
           }
           continue;
         }
+        if (f.kind === 'patient') { moveNpc(g, dt, 0); continue; }
         if (f.kind === 'gone') continue;
         if (f.kind === 'wander') {
           const pos = g.position;

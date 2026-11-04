@@ -21,9 +21,15 @@ export function initFashion(socket, hooks = {}) {
 
   const byId = () => cat.byId;
 
+  // The Boutique is a slide-up catalogue like the Home Store: category chips, a price filter, 3-column cards, a Buy bar.
+  const view = { group: 'all', price: 'any', multi: false, picked: new Set(), q: '', searchOpen: false };
+  const PRICES = [['any', 'Any price', () => true], ['low', 'Under ₦20,000', (c) => c.cost < 20000], ['mid', '₦20,000 to ₦100,000', (c) => c.cost >= 20000 && c.cost <= 100000], ['high', 'Over ₦100,000', (c) => c.cost > 100000]];
+  const GLYPH = { top: '👕', bottom: '👖', shoes: '👟', accessory: '🕶️', perfume: '🧴' };
+  const starsOf = (tier, max) => 1 + Math.round((tier / Math.max(1, max)) * 2);
+
   function paintShop() {
     if (!cat || !info) return;
-    const sig = JSON.stringify([info.owned, info.bottles, info.where, [...open]]);
+    const sig = JSON.stringify([info.owned, info.bottles, info.where, view.group, view.price, view.multi, [...view.picked], view.q, view.searchOpen]);
     if (sig === shopSig) return;
     shopSig = sig;
     const here = info.where === 'boutique';
@@ -31,51 +37,96 @@ export function initFashion(socket, hooks = {}) {
     $('boutiqueCount').textContent = `You own ${info.owned.length} of ${info.limits.clothes} clothes and ${info.bottles.length} of ${info.limits.bottles} perfume bottles.`;
     const body = $('boutiqueBody');
     body.replaceChildren();
-    const section = (key, title, sub, rows) => {
-      const isOpen = open.has(key);
-      const head = el('button', `groupHead${isOpen ? ' on' : ''}`);
-      head.append(el('span', 'skillName', `${isOpen ? '▾' : '▸'} ${title}`), el('span', 'billWho', sub));
-      head.addEventListener('click', () => {
-        if (open.has(key)) open.delete(key);
-        else open.add(key);
-        shopSig = '';
-        paintShop();
-      });
-      body.append(head);
-      if (isOpen) for (const r of rows) body.append(r);
+    const redraw = () => { shopSig = ''; paintShop(); };
+
+    const chips = el('div', 'catChips');
+    const chip = (id, text) => {
+      const b = el('button', `catChip${view.group === id ? ' on' : ''}`, text);
+      b.dataset.group = id;
+      b.addEventListener('click', () => { view.group = id; redraw(); });
+      return b;
     };
-    for (const s of cat.slots) {
-      const items = cat.clothes.filter((c) => c.slot === s.id);
-      const rows = items.map((c) => {
-        const have = info.owned.includes(c.id);
-        const row = el('div', 'job');
-        const top = el('div', 'skillHead');
-        top.append(el('span', 'skillName', c.name), el('span', 'tagc', naira(c.cost)));
-        const b = el('button', 'mini hot billPay', have ? 'You own this' : 'Buy');
-        b.disabled = !here || have;
-        b.addEventListener('click', () => socket.emit('shopBuy', { kind: 'clothes', id: c.id }));
-        row.append(top, el('div', 'billWho', `${c.brand} · ${c.tierLabel}${c.tier >= 3 ? ' · small charm bonus' : ''}`), b);
-        return row;
-      });
-      section(s.id, s.label, `${items.length} pieces · ${items.filter((c) => info.owned.includes(c.id)).length} owned`, rows);
+    chips.append(chip('all', 'All'));
+    for (const sl of cat.slots) chips.append(chip(sl.id, sl.label));
+    chips.append(chip('perfume', 'Perfume'));
+    body.append(chips);
+
+    const filters = el('div', 'catFilters');
+    const price = el('select', 'catSelect');
+    price.id = 'boutiquePrice';
+    price.setAttribute('aria-label', 'Price filter');
+    for (const [id, text] of PRICES) {
+      const o = el('option', '', text);
+      o.value = id;
+      o.selected = view.price === id;
+      price.append(o);
     }
-    const prow = cat.perfumes.map((p) => {
-      const row = el('div', 'job');
-      const top = el('div', 'skillHead');
-      top.append(el('span', 'skillName', `${p.name}${p.pick ? ' ⭐ Staff pick' : ''}`), el('span', 'tagc', naira(p.cost)));
-      const b = el('button', 'mini hot billPay', 'Buy a bottle');
-      b.disabled = !here;
-      b.addEventListener('click', () => socket.emit('shopBuy', { kind: 'perfume', id: p.id }));
-      row.append(
-        top,
-        el('div', 'billWho', `${p.brand} · ${p.tierLabel} · ${stars(p.stars)}`),
-        el('div', 'billWho', `${p.family}: ${p.notes}`),
-        el('div', 'billWho', `${p.sprays} sprays, each lasts ${p.minutes} minutes`),
-        b,
-      );
-      return row;
-    });
-    section('perfume', 'Perfume', `${cat.perfumes.length} scents`, prow);
+    price.addEventListener('change', () => { view.price = price.value; redraw(); });
+    const multi = el('button', `catToggle${view.multi ? ' on' : ''}`, view.multi ? '✓ Pick several' : 'Pick several');
+    multi.id = 'boutiqueMulti';
+    multi.addEventListener('click', () => { view.multi = !view.multi; view.picked = new Set([...view.picked].slice(0, view.multi ? 99 : 1)); redraw(); });
+    const search = el('button', 'catToggle', '🔍');
+    search.setAttribute('aria-label', 'Search');
+    search.addEventListener('click', () => { view.searchOpen = !view.searchOpen; if (!view.searchOpen) view.q = ''; redraw(); });
+    filters.append(price, multi, search);
+    body.append(filters);
+    if (view.searchOpen) {
+      const q = el('input', 'catSearch');
+      q.id = 'boutiqueSearch';
+      q.type = 'search';
+      q.placeholder = 'Search clothes and perfume';
+      q.value = view.q;
+      q.addEventListener('input', () => { view.q = q.value; redraw(); const again = $('boutiqueSearch'); if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); } });
+      body.append(q);
+    }
+
+    // One list for clothes and perfume. Each entry: key, kind, id, name, brand, cost, tier label, stars, tag, glyph, swatch.
+    const tierMax = Math.max(...cat.clothes.map((c) => c.tier), 4);
+    const entries = [];
+    for (const c of cat.clothes) entries.push({ key: `clothes:${c.id}`, kind: 'clothes', id: c.id, group: c.slot, name: c.name, sub: c.brand, cost: c.cost, stars: starsOf(c.tier, tierMax), tag: c.tier >= 3 ? '+Charm' : '+Looks', glyph: GLYPH[c.slot] || '👕', swatch: c.color, have: info.owned.includes(c.id), tierLabel: c.tierLabel });
+    for (const p of cat.perfumes) entries.push({ key: `perfume:${p.id}`, kind: 'perfume', id: p.id, group: 'perfume', name: p.name, sub: p.brand, cost: p.cost, stars: Math.max(1, Math.min(3, Math.round(p.stars / 2))), tag: '+Scent', glyph: GLYPH.perfume, swatch: null, have: false, tierLabel: p.tierLabel, extra: `${p.family}: ${p.notes}. ${p.sprays} sprays, each lasts ${p.minutes} minutes.` });
+    const test = PRICES.find((p) => p[0] === view.price)[2];
+    const q = view.q.trim().toLowerCase();
+    const list = entries.filter((e) => (view.group === 'all' || e.group === view.group) && test(e) && (!q || `${e.name} ${e.sub}`.toLowerCase().includes(q)));
+    const grid = el('div', 'catGrid');
+    grid.id = 'boutiqueGrid';
+    if (!list.length) grid.append(el('div', 'fine', 'Nothing matches. Try another category or price.'));
+    for (const e of list) {
+      const card = el('button', `catCard${view.picked.has(e.key) ? ' on' : ''}${e.have ? ' off' : ''}`);
+      card.dataset.id = e.key;
+      const pic = el('div', 'catPic');
+      if (e.swatch) pic.style.background = `radial-gradient(circle at 50% 55%, ${e.swatch}, rgba(0,0,0,0.25))`;
+      pic.append(el('span', 'catFallback', e.glyph), el('span', 'catStars', '★'.repeat(e.stars)));
+      if (e.have) pic.append(el('span', 'catOwned', 'Owned'));
+      card.append(pic, el('div', 'catName', e.name), el('div', 'catPrice', naira(e.cost)), el('div', 'catTag', `${e.tag} · ${e.tierLabel}`));
+      card.addEventListener('click', () => {
+        if (e.have) return;
+        if (view.multi) { if (view.picked.has(e.key)) view.picked.delete(e.key); else view.picked.add(e.key); }
+        else view.picked = view.picked.has(e.key) ? new Set() : new Set([e.key]);
+        redraw();
+      });
+      grid.append(card);
+    }
+    body.append(grid);
+
+    const picks = [...view.picked].map((k) => entries.find((e) => e.key === k)).filter((e) => e && !e.have);
+    if (picks.length) {
+      const total = picks.reduce((n, e) => n + e.cost, 0);
+      const bar = el('div', 'catBuy');
+      bar.id = 'boutiqueBuy';
+      const left = el('div', 'catBuyInfo');
+      left.append(el('div', 'skillName', picks.length === 1 ? picks[0].name : `${picks.length} pieces`), el('div', 'billWho', picks.length === 1 ? `${picks[0].sub}${picks[0].extra ? ` · ${picks[0].extra}` : ''}` : picks.map((e) => e.name).join(', ')));
+      const buy = el('button', 'mini hot', `Buy ${naira(total)}`);
+      buy.id = 'boutiqueBuyBtn';
+      buy.disabled = !here;
+      buy.addEventListener('click', () => {
+        for (const e of picks) socket.emit('shopBuy', { kind: e.kind, id: e.id });
+        view.picked = new Set();
+        redraw();
+      });
+      bar.append(left, buy);
+      body.append(bar);
+    }
 
     const mine = $('boutiqueMine');
     mine.replaceChildren();
@@ -102,9 +153,12 @@ export function initFashion(socket, hooks = {}) {
     }
   }
 
+  const wview = { group: 'all' };
+  const WGLYPH = { top: '👕', bottom: '👖', shoes: '👟', accessory: '🕶️' };
+
   function paintWard() {
     if (!cat || !info) return;
-    const sig = JSON.stringify([info.owned, info.worn, info.bottles, info.scent, info.fit, info.charm]);
+    const sig = JSON.stringify([info.owned, info.worn, info.bottles, info.scent, info.fit, info.charm, wview.group]);
     if (sig === wardSig) return;
     wardSig = sig;
     $('wardShop').hidden = false;
@@ -113,18 +167,34 @@ export function initFashion(socket, hooks = {}) {
     const list = $('wardList');
     list.replaceChildren();
     if (!info.owned.length) list.append(el('div', 'fine', 'You have no clothes yet. The Boutique is on the Map.'));
-    for (const s of cat.slots) {
-      const mine = info.owned.filter((id) => byId()[id].slot === s.id);
-      if (!mine.length) continue;
-      list.append(el('div', 'jlabel', s.label));
-      for (const id of mine) {
+    else {
+      const chips = el('div', 'catChips');
+      const mk = (id, text) => {
+        const b = el('button', `catChip${wview.group === id ? ' on' : ''}`, text);
+        b.dataset.group = id;
+        b.addEventListener('click', () => { wview.group = id; wardSig = ''; paintWard(); });
+        return b;
+      };
+      chips.append(mk('all', 'All'));
+      for (const sl of cat.slots) if (info.owned.some((id) => byId()[id].slot === sl.id)) chips.append(mk(sl.id, sl.label));
+      list.append(chips);
+      const grid = el('div', 'catGrid');
+      grid.id = 'wardGrid';
+      for (const id of info.owned) {
         const c = byId()[id];
-        const on = info.worn[s.id] === id;
-        const row = el('button', `decoItem${on ? ' on' : ''}`);
-        row.append(el('span', null, `${c.name} · ${c.brand}`), el('span', 'tagc', on ? 'Wearing' : c.tierLabel));
-        row.addEventListener('click', () => socket.emit(on ? 'takeOff' : 'wear', on ? s.id : id));
-        list.append(row);
+        if (wview.group !== 'all' && c.slot !== wview.group) continue;
+        const on = info.worn[c.slot] === id;
+        const card = el('button', `catCard${on ? ' on' : ''}`);
+        card.dataset.id = id;
+        const pic = el('div', 'catPic');
+        pic.style.background = `radial-gradient(circle at 50% 55%, ${c.color}, rgba(0,0,0,0.25))`;
+        pic.append(el('span', 'catFallback', WGLYPH[c.slot] || '👕'));
+        if (on) pic.append(el('span', 'catOwned', 'Wearing'));
+        card.append(pic, el('div', 'catName', c.name), el('div', 'catPrice', c.brand), el('div', 'catTag', on ? 'Tap to take off' : c.tierLabel));
+        card.addEventListener('click', () => socket.emit(on ? 'takeOff' : 'wear', on ? c.slot : id));
+        grid.append(card);
       }
+      list.append(grid);
     }
     const bl = $('wardBottles');
     bl.replaceChildren();
