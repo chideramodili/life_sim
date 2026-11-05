@@ -441,6 +441,7 @@ function animateOld(group, dt, speed, heading, working, t, sitting = false, exer
   if (M.weights && M.weights.length) { for (const w of M.weights) w.parent && w.parent.remove(w); M.weights = []; }
   if (M.root.position.x !== 0 || M.root.position.z !== 0) { M.root.position.x *= 1 - Math.min(1, dt * 10); M.root.position.z *= 1 - Math.min(1, dt * 10); if (Math.abs(M.root.position.x) + Math.abs(M.root.position.z) < 0.01) M.root.position.x = M.root.position.z = 0; }
   if (M.root.rotation.x !== 0 || M.root.position.y !== 0) { M.root.rotation.x += (0 - M.root.rotation.x) * Math.min(1, dt * 10); M.root.position.y += (0 - M.root.position.y) * Math.min(1, dt * 10); if (Math.abs(M.root.rotation.x) < 0.01) M.root.rotation.x = 0; if (Math.abs(M.root.position.y) < 0.01) M.root.position.y = 0; }
+  if (!sitting && group.userData.laptop) group.userData.laptop.visible = false;
   if (sitting) {
     for (const a of Object.values(M.actions)) a.setEffectiveWeight(0);
     M.mixer.update(dt);
@@ -460,6 +461,37 @@ function animateOld(group, dt, speed, heading, working, t, sitting = false, exer
       turn(M.rig, 'Head', -0.2, 0, 0, 1);
       return;
     }
+    const sd = group.userData.sitDesk;
+    if (sd) {
+      // At a table: turn to face it, slide in so the legs go under it, both hands out on a laptop and typing.
+      const d = ((sd.face - M.root.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      M.root.rotation.y += d * Math.min(1, dt * 8);
+      M.root.position.x += (Math.sin(sd.face) * 0.45 - M.root.position.x) * Math.min(1, dt * 8);
+      M.root.position.z += (Math.cos(sd.face) * 0.45 - M.root.position.z) * Math.min(1, dt * 8);
+      poseSit(M.rig, group, 0.45, 0.12);
+      if (M.fwd === undefined) M.fwd = fitForward(M.root, M.rig);
+      if (M.fwd) for (const side of ['Left', 'Right']) {
+        const k = side === 'Left' ? 0 : 1.7;
+        turn(M.rig, side + 'Arm', ...M.fwd[side].a, 1);
+        const f = M.fwd[side].f;
+        turn(M.rig, side + 'ForeArm', f[0] + Math.sin(t * 13 + k) * 0.06, f[1], f[2], 1);   // fingers tapping
+      }
+      turn(M.rig, 'Head', 0.25, 0, 0, 1);
+      if (!group.userData.laptop) {
+        const lp = new THREE.Group();
+        const base = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.02, 0.24), mat('#b8bcc4')); base.position.y = 0;
+        const scr = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.22, 0.012), mat('#1c2030')); scr.position.set(0, 0.11, 0.11); scr.rotation.x = -0.3;
+        const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.18), new THREE.MeshBasicMaterial({ color: '#5ab0ff' })); glow.position.set(0, 0.11, 0.103); glow.rotation.x = Math.PI - 0.3; glow.rotation.y = Math.PI;
+        lp.add(base, scr, glow);
+        group.add(lp); group.userData.laptop = lp;
+      }
+      const lp = group.userData.laptop;
+      lp.visible = true;
+      lp.position.set(Math.sin(sd.face) * 0.55, 0.81, Math.cos(sd.face) * 0.55);
+      lp.rotation.y = sd.face;
+      return;
+    }
+    if (group.userData.laptop) group.userData.laptop.visible = false;
     poseSit(M.rig, group, 0.45, 0);
     return;
   }

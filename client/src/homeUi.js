@@ -2,6 +2,7 @@
 // This file only shows it and sends requests.
 import { hideOtherPanels } from './panels.js';
 import { thumbFor } from './thumbs.js';
+import { COLOR_TINTS, COLOR_NAMES } from './furniture.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -12,6 +13,24 @@ const el = (tag, cls, text) => {
 };
 const fmt = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 const naira = (n) => `₦${fmt(n)}`;
+
+// A row of colour dots: the piece's own colour (a split dot) and the other choices.
+function swatches(current, onPick, disabled) {
+  const row = el('div', 'colorRow');
+  row.style.cssText = 'display:flex;gap:10px;align-items:center;margin:6px 0;flex-wrap:wrap';
+  row.append(el('span', 'fine', 'Colour:'));
+  COLOR_TINTS.forEach((t, i) => {
+    const b = el('button', `colorDot${i === current ? ' on' : ''}`);
+    b.type = 'button';
+    b.title = COLOR_NAMES[i];
+    b.setAttribute('aria-label', COLOR_NAMES[i]);
+    b.style.cssText = `width:30px;height:30px;border-radius:50%;padding:0;border:3px solid ${i === current ? '#fff' : 'rgba(255,255,255,.3)'};background:${t || 'linear-gradient(135deg,#d8c9a0 50%,#6d6d6d 50%)'};${disabled ? 'opacity:.5;' : ''}`;
+    b.addEventListener('click', (e) => { e.stopPropagation(); if (!disabled) onPick(i); });
+    row.append(b);
+  });
+  row.append(el('span', 'fine', COLOR_NAMES[current] || ''));
+  return row;
+}
 
 export function initHome(socket, hooks = {}) {
   let info = null;
@@ -28,7 +47,7 @@ export function initHome(socket, hooks = {}) {
   // "Pick several" lets you tick a few cards and buy them together. The server still checks every single purchase.
   const TAGS = { bed: 'Sleep', tv: 'Fun', fridge: 'Food', desk: 'Study', cool: 'Cool', sofa: 'Comfort', rug: 'Style', art: 'Style', lamp: 'Light', plant: 'Calm', shelf: 'Style', seat: 'Comfort', bath: 'Bathroom', decor: 'Style', pro: 'Style' };
   const PRICES = [['any', 'Any price', () => true], ['low', 'Under ₦50,000', (c) => c.cost < 50000], ['mid', '₦50,000 to ₦150,000', (c) => c.cost >= 50000 && c.cost <= 150000], ['high', 'Over ₦150,000', (c) => c.cost > 150000]];
-  const view = { group: 'all', q: '', price: 'any', multi: false, picked: new Set(), searchOpen: false };
+  const view = { group: 'all', q: '', price: 'any', multi: false, picked: new Set(), searchOpen: false, color: 0 };
   const stars = (c) => 1 + Math.round((c.tier / Math.max(1, c.tiers - 1)) * 2);
   function paintStore() {
     if (!info) return;
@@ -122,11 +141,11 @@ export function initHome(socket, hooks = {}) {
       buy.id = 'storeBuyBtn';
       buy.disabled = !here;
       buy.addEventListener('click', () => {
-        for (const c of picks) socket.emit('homeBuy', c.id);
+        for (const c of picks) socket.emit('homeBuy', { id: c.id, c: view.color });
         view.picked = new Set();
         storeSig = '';
       });
-      bar.append(info1, buy);
+      bar.append(info1, swatches(view.color, (i) => { view.color = i; storeSig = ''; paintStore(); }, false), buy);
       body.append(bar);
     }
 
@@ -190,7 +209,10 @@ export function initHome(socket, hooks = {}) {
         $('decoPlace').hidden = it.placed;
         $('decoPad').hidden = !it.placed;
         $('decoAway').hidden = !it.placed;
-        for (const b of $('decoMove').querySelectorAll('button')) b.disabled = !here;
+        let cr = $('decoColors');
+        if (!cr) { cr = el('div'); cr.id = 'decoColors'; $('decoSelName').after(cr); }
+        cr.replaceChildren(swatches(it.c || 0, (i) => socket.emit('homeColor', { uid: it.uid, c: i }), !here));
+        for (const b of $('decoMove').querySelectorAll('button:not(.colorDot)')) b.disabled = !here;
       }
     }
 

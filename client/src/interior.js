@@ -106,6 +106,7 @@ const HAIR = ['#111111', '#1c1410', '#2a1a10', '#3a2a1a', '#111111'];
 const CLOTH = ['#c0392b', '#2980b9', '#27ae60', '#f39c12', '#8e44ad', '#16a085', '#d35400', '#7f8c8d', '#e8e8e8', '#2c3e50'];
 
 export function createInterior(scene) {
+  let tableBoxes = [];
   let seatSpots = [];   // where a person can sit in the current room (chairs, sofa seats)
   const root = new THREE.Group();
   root.visible = false;
@@ -176,6 +177,7 @@ export function createInterior(scene) {
     g.add(c);
   };
   const table = (g, x, z, w = 1.6, d = 1.0, color = '#7a5a3a') => {
+    tableBoxes.push({ x, z, hw: w / 2, hd: d / 2 });
     put(g, w, 0.1, d, color, x, 0.8, z);
     for (const dx of [-1, 1]) for (const dz of [-1, 1]) put(g, 0.1, 0.8, 0.1, shade(color, 0.7), x + dx * (w / 2 - 0.1), 0.4, z + dz * (d / 2 - 0.1));
   };
@@ -644,6 +646,7 @@ export function createInterior(scene) {
     for (const c of [...root.children]) root.remove(c);
     figures = [];
     seatSpots = [];
+    tableBoxes = [];
     windows = [];
     lamps = [];
     for (const o of owned) o.dispose && o.dispose();
@@ -687,6 +690,7 @@ export function createInterior(scene) {
       return out;
     },
     seats() { return seatSpots; },
+    tables() { return tableBoxes; },
     hide() {
       clear();
       current = null;

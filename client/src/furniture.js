@@ -220,6 +220,19 @@ function glbPiece(def) {
   return g;
 }
 
+// The colours you can pick for a piece in the store (0 = the piece's own colour).
+export const COLOR_TINTS = [null, '#b8403a', '#3b6fb6', '#3f8f5e'];
+export const COLOR_NAMES = ['Original', 'Red', 'Blue', 'Green'];
+function tintModel(group, tint) {
+  const col = new THREE.Color(tint);
+  group.traverse((o) => {
+    if (!o.isMesh || !o.material) return;
+    const list = Array.isArray(o.material) ? o.material : [o.material];
+    const out = list.map((m) => { const c = m.clone(); if (c.color) c.color.lerp(col, 0.7); return c; });
+    o.material = Array.isArray(o.material) ? out : out[0];
+  });
+}
+
 // What stands in while a model is still loading (or never loads), so a piece you bought is never invisible.
 function standIn(w, d, c) {
   const g = new THREE.Group();
@@ -280,10 +293,12 @@ export function createFurniture(scene) {
   modelWaiters.add(() => rebuild());
 
   let seatSpots = [];
+  let tableBoxes = [];   // where a table or desk stands: you sit facing it, legs under it
   function rebuild() {
     for (const g of meshes.values()) items.remove(g);
     meshes.clear();
     seatSpots = [];
+    tableBoxes = [];
     if (!data) return;
     for (const it of data.items) {
       if (!it.placed) continue;
@@ -292,17 +307,30 @@ export function createFurniture(scene) {
       if (!def || (!build && !def.glb)) continue;
       const [w, d] = def.size;
       const g = new THREE.Group();
+      const tint = COLOR_TINTS[it.c || 0] || null;
+      const look = tint ? { ...def, color: tint } : def;
       // A piece with a real model uses it; until it has loaded (or if it cannot load) the simple box version stands in.
       const real = def.glb ? glbPiece(def) : null;
-      if (real) g.add(real);
-      else if (build) g.add(build(w, d, def));
-      else g.add(standIn(w, d, def));
+      if (real) { if (tint) tintModel(real, tint); g.add(real); }
+      else if (build) g.add(build(w, d, look));
+      else g.add(standIn(w, d, look));
       const fw = it.rot ? d : w;
       const fd = it.rot ? w : d;
       g.position.set(it.x + fw / 2, 0, it.z + fd / 2);
       if (it.rot) g.rotation.y = Math.PI / 2;
       g.userData = { fw, fd };
+      // Touch the wall: a piece on the edge of the room slides until it is flush against that wall (curtains, wardrobes, beds...).
+      if (!def.flat) {
+        g.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(g);
+        const ok = (gap) => gap > 0.015 && gap < 1.6;
+        if (it.x <= -10 && ok(bb.min.x + 10)) g.position.x -= bb.min.x + 10;
+        else if (it.x + fw >= 10 && ok(10 - bb.max.x)) g.position.x += 10 - bb.max.x;
+        if (it.z <= -10 && ok(bb.min.z + 10)) g.position.z -= bb.min.z + 10;
+        else if (it.z + fd >= 10 && ok(10 - bb.max.z)) g.position.z += 10 - bb.max.z;
+      }
       if (def.group === 'seat' || def.group === 'sofa') { const n = Math.max(1, Math.round(Math.max(fw, fd) / (def.group === 'sofa' ? 0.9 : 1.6))); for (let k = 0; k < n; k++) { const o = (k - (n - 1) / 2) * 0.9; seatSpots.push(fw >= fd ? { x: g.position.x + o, z: g.position.z } : { x: g.position.x, z: g.position.z + o }); } }
+      if (def.group === 'desk' || def.id === 'patio_set') tableBoxes.push({ x: g.position.x, z: g.position.z, hw: fw / 2, hd: fd / 2 });
       items.add(g);
       meshes.set(it.uid, g);
     }
@@ -319,6 +347,7 @@ export function createFurniture(scene) {
 
   return {
     seats() { return seatSpots; },
+    tables() { return tableBoxes; },
     // New furniture data from the server (or null on log out).
     set(info) {
       data = info;

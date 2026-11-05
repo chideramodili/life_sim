@@ -28,6 +28,7 @@ export const APPS = [
   { id: 'friends', label: 'Friends', icon: '👥', bg: 'linear-gradient(145deg,#ff8fb1,#e0507f)', click: 'friendsBtn', badge: 'friendsBadge' },
   { id: 'people', label: 'People', icon: '🧑‍🤝‍🧑', bg: 'linear-gradient(145deg,#ffb35c,#e07a1f)', click: 'peopleBtn', badge: 'peopleBadge' },
   { id: 'bills', label: 'Bills', icon: '🧾', bg: 'linear-gradient(145deg,#8be0a8,#2f9e63)', click: 'billsBtn', badge: 'billsBadge' },
+  { id: 'staff', label: 'Staff', icon: '🧑‍💼', bg: 'linear-gradient(145deg,#8fb4ff,#4a6fd0)', click: 'staffBtn', isNew: true, force: true },
   { id: 'skills', label: 'Skills', icon: '📈', bg: 'linear-gradient(145deg,#5fd6d0,#1f9aa0)', click: 'skillsBtn' },
   { id: 'look', label: 'Look', icon: '🎨', bg: 'linear-gradient(145deg,#c7a2ff,#7d4fe0)', click: 'lookBtn' },
   { id: 'story', label: 'Story', icon: '📖', bg: 'linear-gradient(145deg,#ffd36b,#d99a1c)', click: 'chip', force: true },
@@ -38,7 +39,7 @@ export const APPS = [
   { id: 'wall', label: 'Wallpaper', icon: '🖼️', bg: 'linear-gradient(145deg,#6fa8ff,#7a5cff)', wall: true },
   { id: 'radio', label: 'Radio', icon: '📻', bg: 'linear-gradient(145deg,#ff7a6b,#d6343d)', isNew: true, click: 'radioBtn', force: true },
   { id: 'audiomack', label: 'Audiomack', icon: '🎵', bg: 'linear-gradient(145deg,#ffb52e,#d9801a)', isNew: true, click: 'amBtn', force: true },
-  { id: 'spotify', label: 'Spotify', icon: '🎧', bg: 'linear-gradient(145deg,#4fd37c,#1a8f4a)', soon: true, say: 'Music apps are coming soon.' },
+  { id: 'spotify', label: 'Spotify', icon: '🎧', bg: 'linear-gradient(145deg,#4fd37c,#1a8f4a)', isNew: true, click: 'spBtn', force: true },
   { id: 'apple', label: 'Apple Music', icon: '🎶', bg: 'linear-gradient(145deg,#ff6b8a,#c9264f)', soon: true, say: 'Music apps are coming soon.' },
 ];
 

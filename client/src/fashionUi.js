@@ -98,7 +98,14 @@ export function initFashion(socket, hooks = {}) {
       const pic = el('div', 'catPic');
       if (e.swatch) pic.style.background = `radial-gradient(circle at 50% 55%, ${e.swatch}, rgba(0,0,0,0.25))`;
       pic.append(el('span', 'catFallback', e.glyph), el('span', 'catStars', '★'.repeat(e.stars)));
-      if (e.kind === 'clothes') itemPic(cat.byId[e.id], (u) => paintPic(pic, u));
+      if (e.kind === 'clothes') {
+        // Photograph a card only when it scrolls into view, so what you are looking at (dresses, say) is never stuck behind a long queue.
+        const item = cat.byId[e.id];
+        if ('IntersectionObserver' in window) {
+          const ob = new IntersectionObserver((ents) => { if (ents.some((x) => x.isIntersecting)) { ob.disconnect(); itemPic(item, (u) => paintPic(pic, u), pic); } }, { rootMargin: '120px' });
+          ob.observe(pic);
+        } else itemPic(item, (u) => paintPic(pic, u), pic);
+      }
       if (e.have) pic.append(el('span', 'catOwned', 'Owned'));
       card.append(pic, el('div', 'catName', e.name), el('div', 'catPrice', naira(e.cost)), el('div', 'catTag', `${e.tag} · ${e.tierLabel}`));
       card.addEventListener('click', () => {

@@ -63,28 +63,30 @@ async function pump() {
   while (queue.length) {
     const job = queue.shift();
     let url = cache.get(job.key);
-    if (!url) { try { url = await shoot(job); cache.set(job.key, url); } catch { url = null; } }
+    // Skip a card that has already left the screen (you changed category or searched): its picture is asked for again if it comes back.
+    if (!url && job.boxes.length && job.boxes.every((b) => !b.isConnected)) continue;
+    if (!url) { try { url = await shoot(job); if (url) cache.set(job.key, url); } catch { url = null; } }
     for (const cb of job.cbs) { try { cb(url); } catch { /* the card may be gone */ } }
   }
   busy = false;
 }
 
-function ask(key, make, cb) {
+function ask(key, make, cb, box) {
   if (cache.has(key)) { cb(cache.get(key)); return; }
   const hit = queue.find((j) => j.key === key);
-  if (hit) { hit.cbs.push(cb); return; }
-  queue.push({ key, ...make, cbs: [cb] });
+  if (hit) { hit.cbs.push(cb); if (box) hit.boxes.push(box); queue.splice(queue.indexOf(hit), 1); queue.unshift(hit); return; }   // newest request first: what you are looking at now
+  queue.unshift({ key, ...make, cbs: [cb], boxes: box ? [box] : [] });
   pump();
 }
 
 // A Boutique item (from the server's catalogue): item has id, slot, kind, color.
-export function itemPic(item, cb) {
-  if (item.slot === 'dress') return ask('dress:f:' + item.id, { item, frame: 'dress', g: 'f' }, cb);
+export function itemPic(item, cb, box) {
+  if (item.slot === 'dress') return ask('dress:f:' + item.id, { item, frame: 'dress', g: 'f' }, cb, box);
   const frame = item.slot === 'acc' ? (FRAMES[item.kind] ? item.kind : 'hat') : item.slot;
-  ask(`${item.id}:${gender}:${item.color}`, { item, frame, g: gender }, cb);
+  ask(`${item.id}:${gender}:${item.color}`, { item, frame, g: gender }, cb, box);
 }
 // A hairstyle in the character editor.
-export function hairPic(hs, hc, g, cb) { ask(`hair:${g}:${hs}:${hc}`, { hs, hc, g, frame: 'hair' }, cb); }
+export function hairPic(hs, hc, g, cb, box) { ask(`hair:${g}:${hs}:${hc}`, { hs, hc, g, frame: 'hair' }, cb, box); }
 
 // Put the picture on a card's picture box once it exists.
 export function paintPic(box, url) {

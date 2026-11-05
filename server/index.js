@@ -42,6 +42,7 @@ import {
   peopleIn, present, topicVisible, pickTip, overheard,
   REP, repTier, clampRep, payBonus, relBonus,
 } from './social.js';
+import { STAFF, parseStaff, staffInfo, hire as hireStaff, fire as fireStaff, payWages, HOME_SLOWDOWN, DRIVER_ENERGY } from './staff.js';
 import {
   LOAN, CREDIT, parseBank, bankInfo, tickBank, openAccount, deposit, withdraw, takeLoan, payInstallment, payoffLoan, payDebt,
   garnish, addScore,
@@ -50,7 +51,7 @@ import {
   CLOTHES, parseWardrobe, wardrobeInfo, fashionCatalog, publicLook, charmBonus, compliment, COMPLIMENT_COOLDOWN_MS, outfitOf, scentOf,
   buyClothes, sellClothes, wear, takeOff, buyPerfume, sellPerfume, spritz, tickScent,
 } from './fashion.js';
-import { homeSolids, parseHome, homeInfo, effectsOf, buyItem, sellItem, placeItem, putAway, paint, setLights } from './home.js';
+import { homeSolids, parseHome, homeInfo, effectsOf, buyItem, recolorItem, sellItem, placeItem, putAway, paint, setLights } from './home.js';
 
 // ---------- Settings ----------
 const PORT = process.env.PORT || 8080;
@@ -396,6 +397,7 @@ addColumn('handsets', 'TEXT');
 addColumn('laptop', 'TEXT');
 addColumn('job3_id', 'TEXT');
 addColumn('job_city', 'TEXT');
+addColumn('staff_json', 'TEXT');   // hired driver / cleaner / cook
 addColumn('last_work3', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('city', 'TEXT');
 addColumn('home_city', 'TEXT');
@@ -434,7 +436,7 @@ const q = {
   lookDone: db.prepare('UPDATE users SET look_done = 1 WHERE id = ?'),
   setLook: db.prepare('UPDATE users SET body = ?, eyes = ?, skin = ?, hair = ?, style = ?, face = ? WHERE id = ?'),
   insertUser: db.prepare('INSERT INTO users (username, pass_hash, recovery_hash, cash, food, room, created_at, last_seen, phone, start_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
-  saveExtra: db.prepare('UPDATE users SET laptop = ?, job3_id = ?, last_work3 = ?, job_city = ? WHERE id = ?'),
+  saveExtra: db.prepare('UPDATE users SET laptop = ?, job3_id = ?, last_work3 = ?, job_city = ?, staff_json = ? WHERE id = ?'),
   saveUser: db.prepare('UPDATE users SET cash = ?, food = ?, energy = ?, fun = ?, social = ?, clean = ?, toilet = ?, room = ?, story = ?, last_work = ?, bills = ?, skills = ?, job_id = ?, job2_id = ?, last_work2 = ?, handsets = ?, city = ?, home_city = ?, stress = ?, sick = ?, burnout = ?, vehicles = ?, net = ?, rep = ?, bank = ?, home = ?, wardrobe = ?, fines = ?, jail_until = ?, last_seen = ? WHERE id = ?'),
   addLedger: db.prepare('INSERT INTO ledger (user_id, kind, bal, cash, bal_after, cash_after, note, game_min, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   pruneLedger: db.prepare('DELETE FROM ledger WHERE user_id = ? AND id NOT IN (SELECT id FROM ledger WHERE user_id = ? ORDER BY id DESC LIMIT 300)'),
@@ -1171,6 +1173,8 @@ function vehiclesInfo(p) {
   };
 }
 const sendVehicles = (p) => p.socket.emit('vehicles', vehiclesInfo(p));
+const hasCar = (p) => p.vehicles.some((id) => VEHICLES[id].kind === 'car');
+const sendStaff = (p) => p.socket.emit('staff', staffInfo(p.staff, p.cash, hasCar(p)));
 
 // ----- Bank: every movement of money goes through bankCommit, so there is always a record -----
 // Saves the player and writes the transaction lines in ONE database step. Either both happen or neither.
@@ -1433,7 +1437,7 @@ function save(p) {
   let room = p.trip ? p.trip.to : p.room; // a traveller is saved at their destination
   if (room === 'friendhome') room = 'street'; // a visitor wakes up outside next time
   q.saveUser.run(p.cash, round1(p.food), round1(p.energy), round1(p.fun), round1(p.social), round1(p.clean), round1(p.toilet), room, JSON.stringify(p.story), p.lastWork, JSON.stringify(p.bills), JSON.stringify(p.skills), p.jobId, p.job2Id, p.lastWork2 || 0, serializePhones(p.handsets), p.city, p.homeCity, round1(p.stress), p.sick ? 1 : 0, p.burnout ? 1 : 0, JSON.stringify(p.vehicles), JSON.stringify(p.net), round1(p.rep), JSON.stringify(p.bank), JSON.stringify(p.home), JSON.stringify(p.wardrobe), JSON.stringify(p.fines), p.jailUntil || 0, Date.now(), p.userId);
-  q.saveExtra.run(p.laptop, p.job3Id, p.lastWork3 || 0, JSON.stringify(p.jobCity || {}), p.userId);
+  q.saveExtra.run(p.laptop, p.job3Id, p.lastWork3 || 0, JSON.stringify(p.jobCity || {}), JSON.stringify(p.staff || {}), p.userId);
 }
 function saveAll() {
   try {
@@ -2048,6 +2052,7 @@ io.on('connection', (socket) => {
     job3Id: null,
     jobCity: (() => { try { const o = JSON.parse(saved.job_city || '{}'); const r = {}; for (const k of ['main', 'part', 'extra']) if (typeof o[k] === 'string' && Object.hasOwn(CITIES, o[k])) r[k] = o[k]; return r; } catch { return {}; } })(),
     laptop: parseLaptop(saved.laptop),
+    staff: parseStaff(saved.staff_json),
     lastWork3: saved.last_work3 || 0,
     shiftsOnJob3: 0,
     jobTakenAt3: 0,
@@ -2122,6 +2127,7 @@ io.on('connection', (socket) => {
   sendFriends(p, true);
   socket.emit('fashion', fashionCatalog());
   sendVehicles(p);
+  sendStaff(p);
 
   // Request: walk to a point. The server validates and clamps it.
   socket.on('setBody', (v) => {
@@ -2171,9 +2177,16 @@ io.on('connection', (socket) => {
     if (p.sit) { p.sit = false; p.sitTo = null; return; }
     if (p.trip || p.drive || p.shift || p.riding || jailLeft(p) || !p.room) return notice(p, 'You cannot sit down right now.');
     if (!seat || !Number.isFinite(seat.x) || !Number.isFinite(seat.z) || Math.hypot(seat.x - p.x, seat.z - p.z) > 9) return notice(p, 'There is no chair nearby to sit on.');
-    p.sitTo = { x: seat.x, z: seat.z, until: Date.now() + 7000 };
+    p.sitTo = { x: seat.x, z: seat.z, until: Date.now() + 12000 };
     p.tx = seat.x; p.tz = seat.z; p.run = false; p.path = null;
     const b = boundsOf(p.room); p.tx = clamp(p.tx, -b.bx, b.bx); p.tz = clamp(p.tz, -b.bz, b.bz);
+    // Walk AROUND tables, beds and other furniture to the chair (like a tap does), instead of straight at it.
+    if (Math.hypot(p.tx - p.x, p.tz - p.z) > 1.2) {
+      const street = p.room === 'street';
+      const blocked = street ? (x, z) => ctxOf(p).walls.blocked(x, z) : roomBlockedFn(p.room, extraSolids(p));
+      const path = findPath(blocked, { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, street ? { bx: b.bx, bz: b.bz, cell: 1 } : { bx: b.bx, bz: b.bz, cell: 0.5 });
+      if (path && path.length) { p.path = path; p.pathKey = `${p.tx},${p.tz}`; }
+    }
   });
   socket.on('moveTo', (t) => {
     if (p.trip || p.drive) return;
@@ -2899,10 +2912,18 @@ io.on('connection', (socket) => {
   });
 
   // Requests for furniture. Prices, limits, and where things may go are decided here, never in the browser.
-  socket.on('homeBuy', (id) => {
+  socket.on('homeBuy', (req) => {
     const why = homeGate(p, 'homestore');
     if (why) return notice(p, why);
-    homeApply(p, buyItem(p.home, p.cash, id));
+    const id = req && typeof req === 'object' ? req.id : req;   // an id on its own still works (old clients)
+    homeApply(p, buyItem(p.home, p.cash, id, req && typeof req === 'object' ? req.c : 0));
+  });
+  // Changing the colour of something you own is free, and works wherever you can decorate.
+  socket.on('homeColor', (req) => {
+    const why = homeGate(p, HOME);
+    if (why) return notice(p, why);
+    if (!req || typeof req !== 'object') return;
+    homeApply(p, recolorItem(p.home, req.uid, req.c));
   });
   socket.on('homeSell', (uid) => {
     const why = homeGate(p, 'homestore');
@@ -3110,6 +3131,22 @@ io.on('connection', (socket) => {
   });
 
   // Request: travel to another room. The server checks everything.
+  // Hire or let go of help. Hiring costs a fee; wages come out of your cash every real hour you are online.
+  socket.on('staffHire', (id) => {
+    if (typeof id !== 'string') return;
+    const r = hireStaff(p.staff, p.cash, id, hasCar(p));
+    if (!r.ok) return notice(p, r.why);
+    p.cash -= r.cost;
+    notice(p, `You hired a ${STAFF[id].label.toLowerCase()}.`);
+    sendStaff(p);
+  });
+  socket.on('staffRefresh', () => sendStaff(p));
+  socket.on('staffFire', (id) => {
+    if (typeof id !== 'string' || !fireStaff(p.staff, id)) return;
+    notice(p, `You let your ${STAFF[id].label.toLowerCase()} go.`);
+    sendStaff(p);
+  });
+
   socket.on('travel', (req) => {
     if (!req || !has(ROOMS, req.to) || ROOMS[req.to].hidden || !has(travelOf(p), req.method)) return;
     if (p.trip) return notice(p, 'You are already on the way.');
@@ -3118,22 +3155,25 @@ io.on('connection', (socket) => {
     if (req.to === p.room) return notice(p, 'You are already here.');
     const dest = ROOMS[req.to];
     const mode = travelOf(p)[req.method];
+    const withDriver = req.method === 'car' && Boolean(p.staff.driver);   // your own driver: free, and you rest in the back
+    const fare = withDriver ? 0 : mode.cost;
+    const chargeFare = () => { p.cash -= fare; if (withDriver) { p.energy = Math.min(100, p.energy + DRIVER_ENERGY); notice(p, 'Your driver takes you. You rest on the way.'); } };
     if (req.to === HOME && consequences(p.bills).locked) return notice(p, 'Your landlord changed the lock. Pay your rent in Bills to get back in.');
     if (req.to === HOME && p.city !== p.homeCity) return notice(p, `Your home is in ${CITIES[p.homeCity].name}. Take a coach or a flight from the Central Terminal.`);
     if (!venueOpen(req.to)) return notice(p, closedText(req.to));
     if (!dest.solo && occupancy(req.to, p.city) >= dest.cap) return notice(p, `${dest.name} is full right now.`);
-    if (p.cash < mode.cost) return notice(p, 'Not enough cash for that trip.');
+    if (p.cash < fare) return notice(p, 'Not enough cash for that trip.');
     if (req.method === 'walk' && isVenueDoor(req.to) && doorFor(p, req.to) && (p.room === 'street' || inBuilding(p))) {
-      p.cash -= mode.cost;
+      chargeFare();
       startAuto(p, req.to);
       return notice(p, `Walking to ${dest.name}. You can Skip the walk.`);
     }
     if (p.room === 'street' && req.method !== 'walk' && has(RIDE_SPEED, req.method) && isVenueDoor(req.to) && doorFor(p, req.to)) {
-      p.cash -= mode.cost;
+      chargeFare();
       startRide(p, req.method, mode, req.to);
       return notice(p, req.method === 'bus' ? `Waiting for the bus to ${dest.name}.` : req.method === 'taxi' ? 'Your taxi is coming.' : `Heading to ${dest.name}.`);
     }
-    p.cash -= mode.cost;
+    chargeFare();
     socket.leave(spaceOf(p));
     p.room = null;
     const start = Date.now();
@@ -3549,8 +3589,8 @@ setInterval(() => {
       gx = p.path[0].x; gz = p.path[0].z;
     } else p.path = null;
     if (p.sitTo) {   // walking to a chair: sit when close (the chair itself is solid), give up if it takes too long
-      if (Math.hypot(p.sitTo.x - p.x, p.sitTo.z - p.z) < 1.25) { p.x = p.tx = p.sitTo.x; p.z = p.tz = p.sitTo.z; p.sit = true; p.sitTo = null; p.path = null; gx = p.x; gz = p.z; }
-      if (now > p.sitTo.until) { p.sitTo = null; p.tx = p.x; p.tz = p.z; notice(p, 'You could not get to that chair.'); }
+      if (Math.hypot(p.sitTo.x - p.x, p.sitTo.z - p.z) < 1.5) { p.x = p.tx = p.sitTo.x; p.z = p.tz = p.sitTo.z; p.sit = true; p.sitTo = null; p.path = null; gx = p.x; gz = p.z; }
+      else if (now > p.sitTo.until) { p.sitTo = null; p.tx = p.x; p.tz = p.z; notice(p, 'You could not get to that chair.'); }
     }
     const dx = gx - p.x;
     const dz = gz - p.z;
@@ -3623,7 +3663,7 @@ setInterval(() => {
       room: p.room,
       jail: jailLeft(p),
       owns: p.vehicles,
-      drive: p.drive ? { kind: p.drive.kind, model: (VEHICLES[activeVehicle(p, p.drive.kind)] || {}).model || null, cockpit: (VEHICLES[activeVehicle(p, p.drive.kind)] || {}).cockpit || null, kmh: Math.round(Math.abs(p.drive.v) * 3.6) } : null,
+      drive: p.drive ? { kind: p.drive.kind, model: (VEHICLES[activeVehicle(p, p.drive.kind)] || {}).model || null, cockpit: (VEHICLES[activeVehicle(p, p.drive.kind)] || {}).cockpit || null, kmh: Math.round(Math.abs(p.drive.v) * 3.6), rev: p.drive.v < -0.3 } : null,
       wanted: p.wanted ? { cops: p.wanted.cops.length, secs: Math.round((now - p.wanted.since) / 1000) } : null,
       rooms,
       walk: p.auto ? { to: ROOMS[p.auto.to].name, toId: p.auto.to, stage: p.auto.stage, progress: p.auto.d0 ? Math.max(0, Math.min(1, 1 - Math.hypot(p.x - (doorFor(p, p.auto.to) || p).x, p.z - (doorFor(p, p.auto.to) || p).z) / p.auto.d0)) : 0 } : null,
@@ -3651,7 +3691,17 @@ setInterval(() => {
 // Needs slowly drop over time while a player is online.
 setInterval(() => {
   for (const p of players.values()) {
-    for (const n of NEEDS) p[n] = Math.max(0, p[n] - (DECAY_PER_MIN[n] * NEEDS_SPEED * NEEDS_TICK_MS) / 60000);
+    for (const n of NEEDS) {
+      // A cleaner and a cook look after you while you are at home.
+      const help = p.room === HOME && ((n === 'clean' && p.staff.cleaner) || (n === 'food' && p.staff.cook)) ? HOME_SLOWDOWN : 1;
+      p[n] = Math.max(0, p[n] - (DECAY_PER_MIN[n] * NEEDS_SPEED * NEEDS_TICK_MS * help) / 60000);
+    }
+    if (Object.keys(p.staff).length) {
+      const w = payWages(p.staff, p.cash, NEEDS_TICK_MS, hasCar(p));
+      if (w.paid) p.cash -= w.paid;
+      for (const id of w.quit) notice(p, `Your ${STAFF[id].label.toLowerCase()} quit: ${id === 'driver' && !hasCar(p) ? 'you no longer have a car.' : 'you could not pay the wage.'}`);
+      if (w.paid || w.quit.length) sendStaff(p);
+    }
   }
   healthTick();
 }, NEEDS_TICK_MS);
@@ -3801,5 +3851,5 @@ setInterval(() => {
 }, CLOCK_TICK_MS);
 
 httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`Game server running on http://localhost:${PORT}`);
+  console.log(`Game server running on port ${PORT}`);
 });

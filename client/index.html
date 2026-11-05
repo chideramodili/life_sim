@@ -252,8 +252,8 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     .decoItem { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 8px 10px; margin-top: 6px; border: 0.5px solid var(--line); border-radius: 8px; background: transparent; color: var(--text); font-size: calc(13px * var(--fs)); }
 
     /* The music "dynamic island": a small pill at the top with a spinning disc and the name of what is playing. */
-    #island { position: fixed; top: 12px; left: 50%; transform: translateX(-50%) scale(0.8); opacity: 0; pointer-events: none; z-index: 6; display: flex; align-items: center; gap: 8px; max-width: min(230px, calc(100vw - 210px)); padding: 4px 6px 4px 5px; border-radius: 999px; background: rgba(8,8,12,0.82); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.35), inset 0 0 0 0.5px rgba(255,255,255,0.18); transition: opacity .25s, transform .4s cubic-bezier(.22,.8,.3,1), top .3s ease, width .3s ease; }
-    #island.on { opacity: 1; transform: translateX(-50%) scale(1); pointer-events: auto; }
+    #island { position: fixed; top: 12px; left: var(--isl-l, 50%); transform: translateX(var(--isl-tx, -50%)) scale(0.8); opacity: 0; pointer-events: none; z-index: 6; display: flex; align-items: center; gap: 8px; max-width: var(--isl-w, min(230px, calc(100vw - 210px))); padding: 4px 6px 4px 5px; border-radius: 999px; background: rgba(8,8,12,0.82); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.35), inset 0 0 0 0.5px rgba(255,255,255,0.18); transition: opacity .25s, transform .4s cubic-bezier(.22,.8,.3,1), top .3s ease, width .3s ease; }
+    #island.on { opacity: 1; transform: translateX(var(--isl-tx, -50%)) scale(1); pointer-events: auto; }
     #island { display: block; }
     #island .top { display: flex; align-items: center; gap: 8px; min-width: 0; }
     #island .more { display: none; padding: 8px 4px 4px; }
@@ -266,12 +266,16 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     #island .ctl button { width: 44px; height: 34px; border-radius: 17px; font-size: 15px; }
     #island .ctl #islOpen { width: auto; padding: 0 14px; font-size: 12px; font-weight: 600; }
     /* Radio and Audiomack open as a full phone screen; the walking stick and other buttons step aside while they are open. */
-    body #radioPanel, body #amPanel { position: fixed; inset: 0; right: 0; bottom: 0; width: auto; max-height: none; max-width: none; border-radius: 0; z-index: 40; padding: max(14px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom)); overflow-y: auto; box-sizing: border-box; }
+    body #radioPanel, body #amPanel, body #spPanel { position: fixed; inset: 0; right: 0; bottom: 0; width: auto; max-height: none; max-width: none; border-radius: 0; z-index: 40; padding: max(14px, env(safe-area-inset-top)) 16px max(18px, env(safe-area-inset-bottom)); overflow-y: auto; box-sizing: border-box; }
     body.musicOpen #joy, body.musicOpen #island { display: none !important; }
     .npBar { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 12px; font-variant-numeric: tabular-nums; }
     .npCtl { display: flex; gap: 10px; justify-content: center; margin: 4px 0 10px; }
     .npCtl button { min-width: 64px; height: 44px; border-radius: 22px; border: 1px solid var(--line); background: rgba(255,255,255,0.08); color: inherit; font-size: 18px; }
-    body.dateOpen #island.on { transform: translateX(-50%) translateY(46px) scale(1); }
+    body.dateOpen #island.on { transform: translateX(var(--isl-tx, -50%)) translateY(46px) scale(1); }
+    #island.grown { left: 50% !important; --isl-tx: -50% !important; }
+    #island:not(.sp) #islPlay { display: none; }
+    #island.ext #islPrev, #island.ext #islNext { display: none; }
+    #island.ext .ctl { justify-content: center; gap: 14px; }
     #island .disc { flex: none; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 50% 50%, #e8e8ee 0 11%, #d33a6b 12% 30%, #15151a 31% 36%, #2b2b34 37% 52%, #15151a 53% 60%, #2b2b34 61% 100%); box-shadow: 0 0 0 1px rgba(255,255,255,0.15); animation: islandSpin 2.4s linear infinite; }
     #island .disc::after { content: ''; display: block; width: 100%; height: 100%; border-radius: 50%; background: conic-gradient(from 20deg, transparent 0 40deg, rgba(255,255,255,0.28) 55deg, transparent 80deg 200deg, rgba(255,255,255,0.2) 225deg, transparent 250deg); }
     @keyframes islandSpin { to { transform: rotate(360deg); } }
@@ -324,7 +328,7 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     #photoModal button { height: 42px; padding: 0 18px; border: 0; border-radius: 10px; font-weight: 600; background: var(--hi); color: var(--on-hi); }
     #doorBtn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 96px; z-index: 6; height: 46px; padding: 0 22px; border: 0; border-radius: 23px; font-weight: 700; background: var(--hi); color: var(--on-hi); box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
     #doorBtn[hidden] { display: none; }
-    #amPanel, #radioPanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
+    #amPanel, #radioPanel, #spPanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
     #amPanel { right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
     .radioChips { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 8px; scrollbar-width: none; }
     .radioChips button { flex: none; border: 1px solid var(--line); background: transparent; color: inherit; border-radius: 999px; padding: 5px 11px; font-size: 12px; }
@@ -531,6 +535,11 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
 
   <button id="radioBtn" hidden aria-hidden="true" tabindex="-1">Radio</button>
   <button id="amBtn" hidden aria-hidden="true" tabindex="-1">Audiomack</button>
+  <button id="spBtn" hidden aria-hidden="true" tabindex="-1">Spotify</button>
+  <div id="spPanel" class="panel" hidden>
+    <div class="sheetHead"><span>Spotify</span><button id="spClose" class="closeX" aria-label="Close Spotify">×</button></div>
+    <div id="spBody"></div>
+  </div>
   <div id="amPanel" class="panel" hidden>
     <div class="sheetHead"><span>Audiomack</span><button id="amClose" class="closeX" aria-label="Close Audiomack">×</button></div>
     <div id="amBody"></div>
@@ -622,7 +631,7 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     <div class="fine">Tap a category to see everything in it, from basic to luxury. Better pieces cost more and do more. Buy here, then place it in your Home. The store buys things back at half price. Open 09:00 to 19:00.</div>
   </div>
 
-  <div id="island" aria-live="polite"><div class="top"><div class="disc"></div><div class="nm"><span></span></div><div class="bars"><i></i><i></i><i></i></div><button id="islandStop" aria-label="Stop music" type="button">■</button></div><div class="more"><div class="prog"><span id="islT0">0:00</span><div class="track"><i id="islFill"></i></div><span id="islT1">LIVE</span></div><div class="ctl"><button id="islPrev" type="button" aria-label="Previous">⏮</button><button id="islOpen" type="button">Open app</button><button id="islNext" type="button" aria-label="Next">⏭</button></div></div></div>
+  <div id="island" aria-live="polite"><div class="top"><div class="disc"></div><div class="nm"><span></span></div><div class="bars"><i></i><i></i><i></i></div><button id="islandStop" aria-label="Stop music" type="button">■</button></div><div class="more"><div class="prog"><span id="islT0">0:00</span><div class="track"><i id="islFill"></i></div><span id="islT1">LIVE</span></div><div class="ctl"><button id="islPrev" type="button" aria-label="Previous">⏮</button><button id="islPlay" type="button" aria-label="Play or pause">⏯</button><button id="islOpen" type="button">Open app</button><button id="islNext" type="button" aria-label="Next">⏭</button></div></div></div>
 
   <div id="decoPanel" class="panel" hidden>
     <div class="sheetHead"><span>Decorate</span><button id="decoClose" class="closeX" aria-label="Close decorate">×</button></div>

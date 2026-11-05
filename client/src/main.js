@@ -8,6 +8,7 @@ import { initChat } from './chatUi.js';
 import { initLook } from './settingsUi.js';
 import { initWorld } from './worldUi.js';
 import { initLife } from './lifeUi.js';
+import { initStaff } from './staffUi.js';
 import { initSocial } from './socialUi.js';
 import { loadModel, whenModelReady, attachModel, animateModel, applyLook, detachModel } from './model.js';
 import { decodeLook2, DEFAULT_LOOK2 } from './person2.js';
@@ -36,6 +37,7 @@ import { initFriends } from './friendsUi.js';
 import { initCrime } from './crimeUi.js';
 import { initVisit } from './visitUi.js';
 import { initControls } from './controls.js';
+import { createCarPanel } from './carPanel.js';
 import { createFurniture } from './furniture.js';
 import { hideOtherPanels } from './panels.js';
 import { BRAND, renderLogo } from './brand.js';
@@ -54,6 +56,7 @@ const storyUi = initStory(socket);
 const chatUi = initChat(socket);
 const world = initWorld(socket);
 const life = initLife(socket);
+initStaff(socket);
 const social = initSocial(socket);
 const phonesUi = initPhones(socket);
 const radioUi = initRadio();
@@ -79,8 +82,8 @@ const el = (tag, cls, text) => {
 // So: smoothing only on normal screens, and the sharpness adjusts itself to keep the game running smoothly (see the frame loop).
 const DPR = window.devicePixelRatio || 1;
 const touchy = matchMedia('(pointer: coarse)').matches;
-const renderer = new THREE.WebGLRenderer({ antialias: DPR < 1.75, powerPreference: 'high-performance' });
-const PR_MAX = Math.min(DPR, touchy ? 1.5 : 2);
+const renderer = new THREE.WebGLRenderer({ antialias: DPR < 2.5, powerPreference: 'high-performance' });
+const PR_MAX = Math.min(DPR, 2);   // full sharpness again (the earlier cap made it blurry)
 let prNow = PR_MAX;
 renderer.setPixelRatio(prNow);
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -311,7 +314,8 @@ function updateDoors(dt) {
 
 // ---------- Players ----------
 const avatars = new Map(); // id -> { group, target }
-const walkInput = initControls({ socket, getMe: () => avatars.get(myId), orbit: controls, camera });
+const carPanel = createCarPanel();
+const walkInput = initControls({ socket, getMe: () => avatars.get(myId), orbit: controls, camera, carPanel });
 let myId = null;
 
 function makeAvatar(color, isMe, name) {
@@ -454,7 +458,8 @@ let meDriving = false, driveCockpit = null;
 function updateDrive(m) {
   const on = !!m.drive;
   driveCockpit = on && m.drive.cockpit ? m.drive.cockpit : null;
-  if (on !== meDriving) { meDriving = on; walkInput.setDriving(on); if (!on) setSeatView(false); }
+  if (on !== meDriving) { meDriving = on; walkInput.setDriving(on); carPanel.show(on); if (!on) setSeatView(false); }
+  if (on) carPanel.setSpeed(m.drive.kmh, !!m.drive.rev);
   $('seatBtn').hidden = !on;
   const onStreet = currentRoom === 'street' && !m.trip && !m.jail;
   const owns = Array.isArray(m.owns) && m.owns.length > 0;
@@ -1375,8 +1380,8 @@ function tuneSharpness(dt) {
   if (slowN < 60) return;
   const avg = slowAcc / slowN; slowAcc = 0; slowN = 0;
   let next = prNow;
-  if (avg > 0.026) { next = Math.max(0.6, prNow * 0.85); goodWindows = 0; }                 // under ~38 fps: lower it
-  else if (avg < 0.0175) { if (++goodWindows >= 4) { next = Math.min(PR_MAX, prNow * 1.1); goodWindows = 0; } } // comfortably 57+ fps: raise it
+  if (avg > 0.045) { next = Math.max(1.25, prNow * 0.9); goodWindows = 0; }                 // really slow (under ~22 fps): lower it a little, never below 1.25
+  else if (avg < 0.03) { if (++goodWindows >= 2) { next = Math.min(PR_MAX, prNow * 1.1); goodWindows = 0; } } // comfortably 57+ fps: raise it
   else goodWindows = 0;
   if (Math.abs(next - prNow) > 0.01) { prNow = next; renderer.setPixelRatio(prNow); renderer.setSize(window.innerWidth, window.innerHeight); }
 }
@@ -1407,6 +1412,19 @@ renderer.setAnimationLoop(() => {
         const wantReach = street.doorDistance(a.group.position.x, a.group.position.z) < 1.5 ? 1 : 0;
         a.group.userData.reach = (a.group.userData.reach || 0) + (wantReach - (a.group.userData.reach || 0)) * Math.min(1, dt * 8);
       } else a.group.userData.reach = 0;
+      // Sitting near a table or desk: face it, with the legs going under it (and a laptop to type on).
+      if (a.sit && !a.veh) {
+        const tabs = currentRoom === 'home' || currentRoom === 'friendhome' ? furniture.tables() : interior.tables();
+        const px = a.group.position.x, pz = a.group.position.z;
+        let bestT = null, bd = 1.5;
+        for (const t of tabs) { const qx = Math.max(t.x - t.hw, Math.min(t.x + t.hw, px)), qz = Math.max(t.z - t.hd, Math.min(t.z + t.hd, pz)); const dd = Math.hypot(qx - px, qz - pz); if (dd < bd) { bd = dd; bestT = { qx, qz, t }; } }
+        if (bestT) {
+          let ang = a.group.userData.sitDesk ? a.group.userData.sitDesk.face : a.heading || 0;
+          if (bd > 0.05) ang = Math.atan2(bestT.qx - px, bestT.qz - pz);
+          else { const ox = bestT.t.x - px, oz = bestT.t.z - pz; if (Math.hypot(ox, oz) > 0.05) ang = Math.atan2(ox, oz); }
+          a.group.userData.sitDesk = { face: Math.round(ang / (Math.PI / 2)) * (Math.PI / 2) };
+        } else a.group.userData.sitDesk = null;
+      } else a.group.userData.sitDesk = null;
       const onBike = a.veh && a.vehKind === 'bike';
       animateModel(a.group, dt, a.speed, onBike ? a.ry : a.heading, a.working && !onBike, tnow, onBike ? 'bike' : a.sit && !a.veh, onBike ? 0 : a.exercise || 0);
     }

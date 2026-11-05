@@ -36,6 +36,19 @@ function kick(ctx, out, t, vol = 0.9) {
   o.connect(g).connect(out); o.start(t); o.stop(t + 0.3);
 }
 let amLink = store.get('am', '');
+const nice = (x) => decodeURIComponent(String(x || '')).replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+// What the game can honestly know about an Audiomack link: the artist and title are in the link itself.
+export function audiomackName(u) {
+  const m = /audiomack\.com\/([^/]+)\/(song|album|playlist)\/([^/?#]+)/.exec(String(u || ''));
+  if (!m) return 'Audiomack';
+  return m[2] === 'song' ? `${nice(m[3])} · ${nice(m[1])}` : `${m[2] === 'album' ? 'Album' : 'Playlist'}: ${nice(m[3])} · ${nice(m[1])}`;
+}
+// Spotify: only open.spotify.com playlist / album / track / episode / show links; we build the uri ourselves.
+export function spotifyUri(u) {
+  const m = /^https:\/\/open\.spotify\.com\/(?:intl-[a-z-]+\/)?(playlist|album|track|episode|show|artist)\/([A-Za-z0-9]{10,40})\/?(?:[?#].*)?$/.exec(String(u || '').trim());
+  return m ? { kind: m[1], id: m[2], uri: `spotify:${m[1]}:${m[2]}`, url: `https://open.spotify.com/${m[1]}/${m[2]}` } : null;
+}
+let spLink = store.get('sp', '');
 // Only accept real audiomack.com links; build the embed address ourselves (never trust pasted HTML).
 export function audiomackEmbed(u) {
   const m = /^https:\/\/(?:www\.)?audiomack\.com\/([A-Za-z0-9._-]+)\/(song|album|playlist)\/([A-Za-z0-9._-]+)\/?(?:[?#].*)?$/.exec(String(u || '').trim());
@@ -317,21 +330,75 @@ export function initRadio() {
     const inp = el('input'); inp.type = 'url'; inp.placeholder = 'https://audiomack.com/artist/song/title'; inp.value = amLink;
     inp.style.cssText = 'width:100%;box-sizing:border-box;margin-top:6px;height:36px;border-radius:8px;border:1px solid var(--line);background:transparent;color:inherit;padding:0 8px;';
     const go = el('button', 'mini', 'Load'); const msg = el('div', 'fine'); const amBox = el('div');
-    const load = () => {
+    const load = (auto) => {
       const emb = audiomackEmbed(inp.value);
       if (!emb) { msg.textContent = 'That is not an Audiomack song, album or playlist link.'; return; }
       stop(true); amLink = inp.value.trim(); store.set('am', amLink);
       msg.textContent = 'Loaded. Press play inside the player below.';
       amBox.replaceChildren();
+      if (!auto) { current = { id: 'am', name: audiomackName(amLink), ext: 'am', stop() { amBox.replaceChildren(); msg.textContent = 'Stopped. Press Load to play again.'; } }; startAt = performance.now(); }
       const f = document.createElement('iframe');
       f.src = emb; f.height = '252'; f.style.cssText = 'width:100%;border:0;border-radius:10px;margin-top:8px;';
       f.allow = 'autoplay'; f.title = 'Audiomack player';
       amBox.append(f);
     };
-    go.addEventListener('click', load);
+    go.addEventListener('click', () => load(false));
     am.append(inp, go, msg, amBox, el('div', 'fine', 'Songs are played by Audiomack and follow its own rules. Some songs may be unavailable in your region.'));
     body.append(am);
-    if (amLink && audiomackEmbed(amLink)) load();
+    if (amLink && audiomackEmbed(amLink)) load(true);
+  }
+
+  // ---- Spotify app: paste a Spotify link; it plays in Spotify's official embedded player. Spotify's own control channel tells us
+  // when it plays / pauses and where it is, so the island and the one-at-a-time rule work. No custom Next / Previous: Spotify's player has its own.
+  const sp = { ctrl: null, pos: 0, dur: 0, paused: true, name: '', box: null, msg: null };
+  let spApiP = null;
+  const spApi = () => spApiP || (spApiP = new Promise((res, rej) => {
+    window.onSpotifyIframeApiReady = (api) => res(api);
+    const sc = document.createElement('script'); sc.src = 'https://open.spotify.com/embed/iframe-api/v1'; sc.async = true;
+    sc.onerror = () => rej(new Error('blocked'));
+    document.body.append(sc);
+    setTimeout(() => rej(new Error('slow')), 20000);
+  }));
+  function claimSpotify() {
+    if (current && current.id === 'sp') return;
+    if (current) { try { current.stop(); } catch { /* ignore */ } }
+    try { audio.pause(); } catch { /* ignore */ }
+    current = { id: 'sp', name: sp.name || 'Spotify', ext: 'sp', stop() { try { sp.ctrl && sp.ctrl.pause(); } catch { /* ignore */ } } };
+    startAt = performance.now();
+  }
+  function paintSp() {
+    const body = $('spBody'); if (!body) return;
+    body.replaceChildren();
+    const wrap = el('div', 'job radioRow');
+    wrap.append(el('div', 'fine', 'Paste a Spotify playlist, album or song link and play it here.'));
+    const inp = el('input'); inp.type = 'url'; inp.placeholder = 'https://open.spotify.com/playlist/...'; inp.value = spLink;
+    inp.style.cssText = 'width:100%;box-sizing:border-box;margin-top:6px;height:36px;border-radius:8px;border:1px solid var(--line);background:transparent;color:inherit;padding:0 8px;';
+    const go = el('button', 'mini', 'Load'); const msg = el('div', 'fine'); const box = el('div'); box.style.cssText = 'margin-top:8px;';
+    sp.msg = msg; sp.box = box;
+    go.addEventListener('click', async () => {
+      const u = spotifyUri(inp.value);
+      if (!u) { msg.textContent = 'That is not a Spotify playlist, album or song link.'; return; }
+      spLink = inp.value.trim(); store.set('sp', spLink);
+      msg.textContent = 'Loading Spotify…';
+      try {
+        const api = await spApi();
+        if (sp.ctrl) { try { sp.ctrl.destroy(); } catch { /* ignore */ } sp.ctrl = null; }
+        box.replaceChildren(); const holder = el('div'); box.append(holder);
+        sp.name = ({ playlist: 'Spotify playlist', album: 'Spotify album', track: 'Spotify song', episode: 'Spotify episode', show: 'Spotify show', artist: 'Spotify artist' })[u.kind];
+        fetch('https://open.spotify.com/oembed?url=' + encodeURIComponent(u.url)).then((r) => (r.ok ? r.json() : null)).then((j) => { if (j && j.title) { sp.name = String(j.title).slice(0, 60); if (current && current.id === 'sp') current.name = sp.name; } }).catch(() => {});
+        api.createController(holder, { uri: u.uri, width: '100%', height: u.kind === 'track' ? 152 : 352 }, (ctrl) => {
+          sp.ctrl = ctrl; sp.pos = 0; sp.dur = 0; sp.paused = true;
+          msg.textContent = 'Loaded. Press play inside the player below. (Songs are played by Spotify. Without a logged-in Spotify account in this browser, Spotify plays 30-second previews.)';
+          ctrl.addListener('playback_update', (e) => {
+            const d = e && e.data ? e.data : {};
+            sp.pos = d.position || 0; sp.dur = d.duration || 0; sp.paused = !!d.isPaused && !d.isBuffering;
+            if (!d.isPaused || d.isBuffering) claimSpotify();     // it started playing: everything else stops
+          });
+        });
+      } catch { msg.textContent = 'Spotify could not load here. Check your connection and try again.'; }
+    });
+    wrap.append(inp, go, msg, box, el('div', 'fine', 'Spotify has its own Next and Previous buttons inside its player. This game does not add its own.'));
+    body.append(wrap);
   }
 
   fetch('/radio/stations.json').then((r) => (r.ok ? r.json() : null)).then((j) => {
@@ -356,7 +423,9 @@ export function initRadio() {
   };
   $('radioBtn').addEventListener('click', () => togglePanel('radioPanel', () => { loadLive(chip); paint(); }));
   $('amBtn').addEventListener('click', () => togglePanel('amPanel', () => { if (!$('amBody').firstChild) paintAm(); }));
+  $('spBtn').addEventListener('click', () => togglePanel('spPanel', () => { if (!$('spBody').firstChild) paintSp(); }));
   $('radioClose').addEventListener('click', () => { $('radioPanel').hidden = true; });
+  $('spClose').addEventListener('click', () => { $('spPanel').hidden = true; });
   $('amClose').addEventListener('click', () => { $('amPanel').hidden = true; });
   const vol = $('radioVol');
   vol.value = String(Math.round(volume * 100));
@@ -368,7 +437,7 @@ export function initRadio() {
   paint();
   // Next / previous: moves through the list the current station came from (or all generated + your own stations).
   function step(dir) {
-    if (!current) return;
+    if (!current || current.ext) return;
     const all = curList && curList.length ? curList : [...SYNTH, ...files];
     if (!all.length) return;
     const k = all.findIndex((x) => x.id === current.id);
@@ -377,6 +446,8 @@ export function initRadio() {
   const fmt = (t) => { t = Math.max(0, Math.floor(t || 0)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
   const timing = () => {
     if (!current) return { a: '0:00', b: '', pct: 0 };
+    if (current.ext === 'am') return { a: 'Audiomack', b: '', pct: 0 };
+    if (current.ext === 'sp') return { a: fmt(sp.pos / 1000), b: sp.dur ? fmt(sp.dur / 1000) : '', pct: sp.dur ? Math.min(100, (sp.pos / sp.dur) * 100) : 0 };
     const real = current.live === undefined && !current.id.startsWith('file-') ? false : !current.live;
     const isFile = current.id.startsWith('file-');
     if (isFile && isFinite(audio.duration) && audio.duration > 0) return { a: fmt(audio.currentTime), b: fmt(audio.duration), pct: (audio.currentTime / audio.duration) * 100 };
@@ -385,16 +456,26 @@ export function initRadio() {
   const npNext = $('npNext'), npPrev = $('npPrev'), npStop = $('npStop');
   if (npNext) { npNext.addEventListener('click', () => step(1)); npPrev.addEventListener('click', () => step(-1)); npStop.addEventListener('click', () => stop()); }
   // Radio / Audiomack are full-screen: hide the joystick and island while they are open.
-  const musicState = () => document.body.classList.toggle('musicOpen', !$('radioPanel').hidden || !$('amPanel').hidden);
+  const musicState = () => document.body.classList.toggle('musicOpen', !$('radioPanel').hidden || !$('amPanel').hidden || !$('spPanel').hidden);
   const mo = new MutationObserver(musicState);
   mo.observe($('radioPanel'), { attributes: true, attributeFilter: ['hidden'] });
   mo.observe($('amPanel'), { attributes: true, attributeFilter: ['hidden'] });
+  mo.observe($('spPanel'), { attributes: true, attributeFilter: ['hidden'] });
 
   // The dynamic island: name of what is playing with a spinning disc. Tap it to grow it (previous / next / time); tap again to shrink.
   const isl = document.getElementById('island');
   if (isl) {
     const nm = isl.querySelector('.nm span');
     let shown = '', bigT = 0;
+    // Keep the island between the date circle and the cash pill, never under either one.
+    const placeIsland = () => {
+      const cashEl = $('tbCash'), leftEl = $('tbLeft');
+      if (!cashEl || isl.classList.contains('grown')) return;
+      const vw = window.innerWidth, cashL = cashEl.getBoundingClientRect().left;
+      const leftR = leftEl && leftEl.offsetWidth ? leftEl.getBoundingClientRect().right : 12;
+      const l = Math.max(12, leftR + 8), w = Math.max(90, Math.min(260, cashL - 10 - l - 14));   // 14 = the island's own padding
+      if (cashL > 0 && cashL < vw && w >= 90) { isl.style.setProperty('--isl-l', l + 'px'); isl.style.setProperty('--isl-tx', '0px'); isl.style.setProperty('--isl-w', w + 'px'); }
+    };
     const setBig = (on) => { isl.classList.toggle('grown', on); clearTimeout(bigT); if (on) bigT = setTimeout(() => isl.classList.remove('grown'), 12000); };
     const sync = () => {
       const name = current ? current.name : '';
@@ -404,6 +485,9 @@ export function initRadio() {
         if (A) { A.textContent = t.a; B.textContent = t.b; F.style.width = t.pct + '%'; }
       }
       document.body.classList.toggle('musicOn', !!name);
+      isl.classList.toggle('ext', !!(current && current.ext));
+      isl.classList.toggle('sp', !!(current && current.ext === 'sp'));
+      placeIsland();
       if (name === shown) return;
       shown = name;
       isl.classList.toggle('on', !!name);
@@ -417,7 +501,8 @@ export function initRadio() {
       if (id === 'islandStop') { stop(); sync(); return; }
       if (id === 'islPrev') { step(-1); setBig(true); return; }
       if (id === 'islNext') { step(1); setBig(true); return; }
-      if (id === 'islOpen') { setBig(false); const b = $('radioBtn'); if (b) b.click(); return; }
+      if (id === 'islPlay') { try { sp.ctrl && sp.ctrl.togglePlay(); } catch { /* ignore */ } return; }
+      if (id === 'islOpen') { setBig(false); const b = $(current && current.ext === 'am' ? 'amBtn' : current && current.ext === 'sp' ? 'spBtn' : 'radioBtn'); if (b) b.click(); return; }
       setBig(!isl.classList.contains('grown'));
     });
   }

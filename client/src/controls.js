@@ -5,7 +5,7 @@ const SEND_MS = 90;      // how often a new target is sent while a direction is 
 const DEAD = 0.18;
 const RIM = 0.85;        // push the stick this far out (0 to 1) to run       // ignore tiny stick movement
 
-export function initControls({ socket, getMe, orbit, camera }) {
+export function initControls({ socket, getMe, orbit, camera, carPanel }) {
   const keys = new Set();
   let joy = { x: 0, y: 0 };      // joystick, each -1..1 (y up is +1)
   let pad = { x: 0, y: 0 };      // gamepad stick
@@ -83,7 +83,9 @@ export function initControls({ socket, getMe, orbit, camera }) {
     const now = performance.now();
     if (driving) {
       // Steering and throttle, relative to the car (not the camera). Send only when changed, plus a steady stream while held.
-      const steer = Math.max(-1, Math.min(1, x)), thr = Math.max(-1, Math.min(1, y));
+      // The on-screen panel wins while a pedal or the wheel is in use; otherwise keys / gamepad still work.
+      const cp = carPanel ? carPanel.read() : { steer: 0, thr: 0, pedals: false, wheel: false };
+      const steer = Math.max(-1, Math.min(1, cp.wheel ? cp.steer : x)), thr = Math.max(-1, Math.min(1, cp.pedals ? cp.thr : y));
       const zero = Math.abs(steer) < 0.05 && Math.abs(thr) < 0.05;
       if (zero && driveZero) return;
       if (now - driveSent < 60 && !(zero && !driveZero)) return;

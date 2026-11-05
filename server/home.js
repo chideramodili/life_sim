@@ -3,7 +3,9 @@
 // Some pieces make your home better to live in (a bed, a TV, a fridge, a desk, plants). Only PLACED pieces count.
 // Only the best piece in each "slot" counts, so buying five beds never stacks up.
 
-export const GRID = 8;          // you may place things on cells from -8 to 8 on both axes
+export const GRID = 10;         // the room runs -10..10; pieces sit on whole-metre cells from -10 to 9 so they can touch every wall
+export const GMIN = -10, GMAX = 9;
+export const COLOR_CHOICES = 4; // 0 = the piece's own colour, 1-3 = the other colours you can pick in the store
 export const MAX_ITEMS = 30;    // most pieces you can own at once
 export const SELL_BACK = 0.5;   // the store buys things back at half price, so buying and selling is never a way to make money
 export const STYLE_COST = 3000; // changing the wall or floor color
@@ -198,7 +200,7 @@ export function parseHome(json) {
     if (groupCount(h, CATALOG[it.id].group) >= GROUPS[CATALOG[it.id].group].cap) continue;
     seen.add(it.uid);
     maxUid = Math.max(maxUid, it.uid);
-    const item = { uid: it.uid, id: it.id, placed: false, x: 0, z: 0, rot: 0 };
+    const item = { uid: it.uid, id: it.id, placed: false, x: 0, z: 0, rot: 0, c: isInt(it.c) && it.c >= 0 && it.c < COLOR_CHOICES ? it.c : 0 };
     if (it.placed === true && isInt(it.x) && isInt(it.z) && (it.rot === 0 || it.rot === 1)) {
       item.x = it.x; item.z = it.z; item.rot = it.rot; item.placed = true;
     }
@@ -220,7 +222,9 @@ export const footprint = (id, rot) => (rot ? [CATALOG[id].size[1], CATALOG[id].s
 export function fits(home, item, x, z, rot) {
   if (!isInt(x) || !isInt(z) || (rot !== 0 && rot !== 1)) return { ok: false, why: 'That spot is not valid.' };
   const [w, d] = footprint(item.id, rot);
-  if (x < -GRID || z < -GRID || x + w - 1 > GRID || z + d - 1 > GRID) return { ok: false, why: 'That does not fit inside your home.' };
+  if (x < GMIN || z < GMIN || x + w - 1 > GMAX || z + d - 1 > GMAX) return { ok: false, why: 'That does not fit inside your home.' };
+  // The front door is in the middle of the front wall: keep the way in clear.
+  if (z + d - 1 >= 9 && x < 2 && x + w > -2 && !CATALOG[item.id].flat) return { ok: false, why: 'Keep the doorway clear.' };
   const flat = Boolean(CATALOG[item.id].flat);
   for (const o of home.items) {
     if (o.uid === item.uid || !o.placed) continue;
@@ -235,7 +239,7 @@ export function fits(home, item, x, z, rot) {
 // The first free spot, searching outwards from the middle of the room.
 export function autoSpot(home, item, rot = 0) {
   const cells = [];
-  for (let x = -GRID; x <= GRID; x++) for (let z = -GRID; z <= GRID; z++) cells.push([x, z]);
+  for (let x = GMIN; x <= GMAX; x++) for (let z = GMIN; z <= GMAX; z++) cells.push([x, z]);
   cells.sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]) || a[0] - b[0] || a[1] - b[1]);
   for (const [x, z] of cells) if (fits(home, item, x, z, rot).ok) return { x, z };
   return null;
@@ -270,7 +274,7 @@ const okay = (cash, msg) => ({ ok: true, why: '', cash, msg });
 const money = (n) => `₦${n.toLocaleString('en-US')}`;
 const find = (home, uid) => (isInt(uid) ? home.items.find((i) => i.uid === uid) || null : null);
 
-export function buyItem(home, cash, id) {
+export function buyItem(home, cash, id, color = 0) {
   if (!has(CATALOG, id)) return fail('The store does not sell that.');
   const c = CATALOG[id];
   if (home.items.length >= MAX_ITEMS) return fail(`Your home is full of stuff. You can own ${MAX_ITEMS} pieces.`);
@@ -278,7 +282,7 @@ export function buyItem(home, cash, id) {
   const g = GROUPS[c.group];
   if (groupCount(home, c.group) >= g.cap) return fail(`You have enough in ${g.label.toLowerCase()} already (${g.cap}). Sell one to make room.`);
   if (cash < c.cost) return fail(`${c.label} costs ${money(c.cost)}.`);
-  home.items.push({ uid: home.n++, id, placed: false, x: 0, z: 0, rot: 0 });
+  home.items.push({ uid: home.n++, id, placed: false, x: 0, z: 0, rot: 0, c: isInt(color) && color >= 0 && color < COLOR_CHOICES ? color : 0 });
   return okay(-c.cost, `You bought a ${c.label.toLowerCase()} for ${money(c.cost)}. Place it in your Home.`);
 }
 
@@ -304,6 +308,15 @@ export function placeItem(home, req) {
   const f = fits(home, it, req.x, req.z, rot);
   if (!f.ok) return fail(f.why);
   it.x = req.x; it.z = req.z; it.rot = rot; it.placed = true;
+  return okay(0, '');
+}
+
+// Changing the colour of a piece you own is free.
+export function recolorItem(home, uid, color) {
+  const it = find(home, uid);
+  if (!it) return fail('You do not own that.');
+  if (!isInt(color) || color < 0 || color >= COLOR_CHOICES) return fail('That colour is not available.');
+  it.c = color;
   return okay(0, '');
 }
 
@@ -348,7 +361,7 @@ export function homeInfo(home, where) {
   const e = effectsOf(home);
   return {
     where,                      // 'home', 'store', or null: decides which buttons work
-    items: home.items.map((i) => ({ uid: i.uid, id: i.id, placed: i.placed, x: i.x, z: i.z, rot: i.rot })),
+    items: home.items.map((i) => ({ uid: i.uid, id: i.id, placed: i.placed, x: i.x, z: i.z, rot: i.rot, c: i.c || 0 })),
     wall: home.wall, floor: home.floor, lights: home.lights !== false,
     wallColor: WALLS[home.wall], floorColor: FLOORS[home.floor],
     effects: { sleep: e.sleep, fun: e.fun, eat: e.eat, course: e.course, calm: Math.round(e.calm * 100) / 100, lamp: e.lamp },
@@ -372,7 +385,8 @@ export function homeSolids(home) {
   for (const o of home.items) {
     if (!o.placed || !CATALOG[o.id] || CATALOG[o.id].flat) continue;
     const [w, d] = footprint(o.id, o.rot);
-    const z1 = Math.min(o.z + d, 8.4);
+    const nearDoor = o.x < 2 && o.x + w > -2;   // the strip in front of the door stays walkable
+    const z1 = nearDoor ? Math.min(o.z + d, 8.4) : o.z + d;
     if (z1 <= o.z) continue;
     out.push([o.x + 0.04, o.z + 0.04, o.x + w - 0.04, z1 - 0.04]);
   }
