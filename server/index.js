@@ -21,7 +21,7 @@ import { getCity, CITY, DOOR_REACH, routeBetween, pointOnRoute } from './city.js
 import { planFor, stepWork } from './workstyle.js';
 import { restoreBackup, startBackups, finalBackup } from './backup.js';
 import { speedFor, slide, findPath, roomBlockedFn, roomSolids } from './movement.js';
-import { MOVE_FEE, CITIES, CITY_IDS, DEFAULT_CITY, isCity, parseCity, TICKETS, TICKET_IDS, ticketQuote, distanceBetween, HIGHWAY, neighbour, gateAt, arrivalFrom } from './cities.js';
+import { MOVE_FEE, CITIES, CITY_IDS, DEFAULT_CITY, isCity, parseCity, TICKETS, TICKET_IDS, ticketQuote, distanceBetween, HIGHWAY, neighbour, gateAt, arrivalFrom, placeName } from './cities.js';
 import { MAX_LOTS, SELL_LAND, BIZ_MAX_LEVEL, UPGRADE_COST, STOCK_CAP, KINDS, KIND_IDS, isKind, priceOf, validName, isOpen as bizOpenNow, newBiz, step as bizStep, buyStock, payStaff, hire as bizHire, STAFF_WAGE, STAFF_MAX, STAFF_BOOST, HIRE_FEE } from './business.js';
 import { LAPTOPS, LAPTOP_IDS, parseLaptop, laptopTier, buyLaptop, laptopWhy } from './laptops.js';
 import { PHONES, PHONE_IDS, parsePhones, serializePhones, buyPhone, usePhone, hasCamera } from './phones.js';
@@ -35,7 +35,7 @@ import {
 } from './world.js';
 import {
   SKILLS, SKILL_IDS, xpForLevel, MAX_LEVEL, parseSkills, levelOf, progressOf, studyRule, STUDY, PRACTICE, STUDY_MODES,
-  JOBS, jobById, qualifies, JOB_MIN_REP, shiftMs, perkOf, INTERVIEW, needsInterview, startInterview, gradeInterview, STRESS, SICK, clampStress, burnoutNext, sickChance,
+  JOBS, jobById, jobInCity, qualifies, JOB_MIN_REP, shiftMs, perkOf, INTERVIEW, needsInterview, startInterview, gradeInterview, STRESS, SICK, clampStress, burnoutNext, sickChance,
 } from './skills.js';
 import {
   VEHICLES, VEHICLE_IDS, parseVehicles, travelFor, NPCS, NPC_IDS, QUESTS, parseNet, relOf, relLabel, REL_MAX,
@@ -195,6 +195,28 @@ const cleanLook = (v, cur) => {
     face: Array.isArray(o.face) && o.face.length === FACE_N && o.face.every((n) => Number.isInteger(n) && n >= -3 && n <= 3) ? o.face : (Array.isArray(cur.face) ? cur.face : new Array(FACE_N).fill(0)),
   };
 };
+// Second-generation bodies (Superhero male / female). Mirrors client/src/person2.js.
+export const SKIN2_COUNT = 12;
+export const EYES2_IDS = ['brown', 'hazel', 'green', 'blue', 'grey', 'amber'];
+export const HAIRSTYLES2 = { m: ['none', 'buzzed', 'parted'], f: ['none', 'buzzedf', 'buns', 'long'] };
+export const HAIRCOL2_IDS = ['black', 'darkbrown', 'brown', 'chestnut', 'auburn', 'ginger', 'blonde', 'grey', 'white'];
+export const BEARDS2_IDS = ['none', 'beard'];
+export const cleanLook2 = (v) => {
+  const o = v && typeof v === 'object' ? v : {};
+  const g = o.g === 'f' ? 'f' : 'm';
+  const cl = (n) => (Number.isInteger(n) ? Math.max(-2, Math.min(2, n)) : 0);
+  return {
+    g,
+    skin: Number.isInteger(o.skin) && o.skin >= 0 && o.skin < SKIN2_COUNT ? o.skin : 3,
+    eyes: EYES2_IDS.includes(o.eyes) ? o.eyes : 'brown',
+    hs: HAIRSTYLES2[g].includes(o.hs) ? o.hs : (g === 'f' ? 'long' : 'buzzed'),
+    hc: HAIRCOL2_IDS.includes(o.hc) ? o.hc : 'black',
+    bd: g === 'm' && BEARDS2_IDS.includes(o.bd) ? o.bd : 'none',
+    ht: cl(o.ht), bl: cl(o.bl),
+  };
+};
+export const look2Str = (l) => [l.g, l.skin, l.eyes, l.hs, l.hc, l.bd, l.ht, l.bl].join('.');   // compact form sent in every snapshot
+const parseLook2 = (t) => { if (!t) return null; try { const o = JSON.parse(t); return o && typeof o === 'object' ? cleanLook2(o) : null; } catch { return null; } };
 // A player's look. Only these values are accepted, so nobody can store anything else.
 const THEME_PRESETS = ['sunset', 'fresh', 'night'];
 const THEME_ACCENTS = ['coral', 'orange', 'gold', 'mint', 'teal', 'sky', 'pink', 'lavender'];
@@ -344,6 +366,7 @@ const addColumn = (name, ddl) => {
   if (!existingColumns.includes(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${ddl}`);
 };
 for (const n of ['energy', 'fun', 'social', 'clean', 'toilet']) addColumn(n, 'INTEGER NOT NULL DEFAULT 70');
+addColumn('look2', 'TEXT');             // new-generation character (JSON), null until the player has chosen one
 addColumn('recovery_hash', 'TEXT');
 addColumn('email', 'TEXT');             // verified email (password reset by email)
 addColumn('mail_code', 'TEXT');         // sha256 of the 6-digit code we emailed
@@ -398,6 +421,7 @@ const q = {
   userByName: db.prepare('SELECT * FROM users WHERE username = ?'),
   userById: db.prepare('SELECT * FROM users WHERE id = ?'),
   setBody: db.prepare('UPDATE users SET body = ? WHERE id = ?'),
+  setLook2: db.prepare('UPDATE users SET look2 = ?, body = ? WHERE id = ?'),
   setEyes: db.prepare('UPDATE users SET eyes = ? WHERE id = ?'),
   lookDone: db.prepare('UPDATE users SET look_done = 1 WHERE id = ?'),
   setLook: db.prepare('UPDATE users SET body = ?, eyes = ?, skin = ?, hair = ?, style = ?, face = ? WHERE id = ?'),
@@ -550,6 +574,9 @@ app.post('/api/signup', async (req, res) => {
     if (typeof username !== 'string' || !USER_RE.test(username)) {
       return res.status(400).json({ error: 'Username must be 3 to 16 letters, numbers, or underscores.' });
     }
+    const email = typeof (req.body || {}).email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    if (!EMAIL_RE.test(email) || email.length > 254) return res.status(400).json({ error: 'Enter a valid email address.' });
+    if (mailQ.byEmail.get(email)) return res.status(409).json({ error: 'That email is already used by another account.' });
     if (typeof password !== 'string' || password.length < 8 || password.length > 100) {
       return res.status(400).json({ error: 'Password must be 8 to 100 characters.' });
     }
@@ -564,8 +591,10 @@ app.post('/api/signup', async (req, res) => {
     } catch {
       return res.status(409).json({ error: 'That username is taken.' });
     }
+    mailQ.setEmail.run(email, id);   // linked straight away: it is where a forgotten password is sent
     { const l = cleanLook(req.body, { body: req.body.body === 'woman' ? 'woman' : 'man', eyes: 'brown', skin: 0, hair: 'brown', style: 'original' }); q.setLook.run(l.body, l.eyes, l.skin, l.hair, l.style, JSON.stringify(l.face), id); if (req.body.body === undefined) db.prepare('UPDATE users SET look_done = 0 WHERE id = ?').run(id); }   // the game client sends no look: the editor opens after sign-up
 
+    sendMail(email, 'Welcome to Adulthood', `Hi ${username}, your account is ready. This email address is now linked to it, so you can use it to reset your password if you ever forget it.`).catch(() => {});
     res.status(201).json({ token: newSession(id), username, recoveryCode });
   } catch (err) {
     console.error('signup failed', err);
@@ -580,7 +609,7 @@ app.post('/api/login', async (req, res) => {
     if (typeof username !== 'string' || typeof password !== 'string' || password.length > 100) {
       return res.status(400).json({ error: 'Enter a username and password.' });
     }
-    const user = q.userByName.get(username);
+    const user = username.includes('@') && username.length <= 254 ? mailQ.byEmail.get(username.trim().toLowerCase()) : q.userByName.get(username);
     const ok = await checkPassword(password, user ? user.pass_hash : DUMMY_HASH);
     // One message for both cases, so nobody can use it to find out which usernames exist.
     if (!user || !ok) {
@@ -873,7 +902,7 @@ const spaceOf = (p) => (p.room === 'friendhome' ? `home:${p.visiting}` : p.room 
 function roomInfo(id, p = null) {
   const r = ROOMS[id];
   const b = boundsOf(id);
-  const info = { id, name: r.name, color: r.color, accent: r.accent, bounds: b.bx, bx: b.bx, bz: b.bz, solo: Boolean(r.solo) };
+  const info = { id, name: placeName(p ? p.city : DEFAULT_CITY, id, r.name), color: r.color, accent: r.accent, bounds: b.bx, bx: b.bx, bz: b.bz, solo: Boolean(r.solo) };
   const ctx = p ? ctxOf(p) : LAGOS;
   if (r.outdoor) {
     // The layout is the same for everyone in a city. The only thing that is yours is your own plot (in Lagos).
@@ -884,7 +913,7 @@ function roomInfo(id, p = null) {
     if (ctx.id !== DEFAULT_CITY) info.name = ctx.def.name;
     info.parked = ctx.traffic.parked;
     info.bays = ctx.traffic.bays;
-    info.names = Object.fromEntries(Object.keys(ctx.layout.doors).map((k) => [k, ROOMS[k].name]));
+    info.names = Object.fromEntries(Object.keys(ctx.layout.doors).map((k) => [k, placeName(ctx.id, k, ROOMS[k].name)]));
     info.accents = Object.fromEntries(Object.keys(ctx.layout.doors).map((k) => [k, ROOMS[k].accent]));
     info.myPlot = p && ctx.id === p.homeCity ? plotOf(p).id : -1;
     const vv = p ? visitVenues(p) : null;
@@ -913,6 +942,7 @@ function snapshot(key) {
       if (p.lying) o.lie = 1;
       if (p.anim && p.anim.until > Date.now()) o.an = p.anim.k;
       if (p.body === 'woman') o.b = 1;
+      if (p.look2) o.v2 = look2Str(p.look2);
       if (p.eyes && p.eyes !== 'brown') o.e = p.eyes;
       if (p.skin) o.s = p.skin;
       if (p.hair && p.hair !== 'brown') o.h = p.hair;
@@ -1114,10 +1144,10 @@ function jobsInfo(p) {
     current: p.jobId,
     current2: p.job2Id,
     current3: p.job3Id,
-    list: JOBS.filter((j) => !j.hidden || qualifyP(p, j).ok || (j.hidden && allFlags(p).includes(j.flag))).map((j) => {
+    list: JOBS.filter((j) => jobInCity(j, p.city)).filter((j) => !j.hidden || qualifyP(p, j).ok || (j.hidden && allFlags(p).includes(j.flag))).map((j) => {
       const q = qualifyP(p, j);
       return {
-        id: j.id, title: j.title, part: Boolean(j.part), perk: perkOf(j, p.skills).text, pay: payFor(p, j), where: j.remote ? 'Home (remote)' : ROOMS[j.room].name,
+        id: j.id, title: j.title, part: Boolean(j.part), perk: perkOf(j, p.skills).text, pay: payFor(p, j), where: j.remote ? 'Home (remote)' : placeName(p.city, j.room, ROOMS[j.room].name),
         req: (j.req ? `${SKILLS[j.req.skill].label} ${j.req.level}${j.ref && allFlags(p).includes(j.ref) ? ' (referral)' : ''}` : j.hidden ? 'Referral' : j.flag ? 'Story' : 'None') + (j.laptop ? ` + ${LAPTOPS[LAPTOP_IDS.find((id) => LAPTOPS[id].tier >= j.laptop)].label}+` : ''),
         qualified: q.ok, why: q.why,
       };
@@ -1975,6 +2005,7 @@ io.on('connection', (socket) => {
     wardrobe: parseWardrobe(saved.wardrobe),
     faceShape: (() => { try { const a = JSON.parse(saved.face); return Array.isArray(a) && a.length === FACE_N && a.every((n) => Number.isInteger(n) && n >= -3 && n <= 3) ? a : new Array(FACE_N).fill(0); } catch { return new Array(FACE_N).fill(0); } })(),
     lookDone: saved.look_done !== 0,
+    look2: parseLook2(saved.look2),
     body: saved.body === 'woman' ? 'woman' : 'man',
     eyes: EYE_IDS.includes(saved.eyes) ? saved.eyes : 'brown',
     skin: Number.isInteger(saved.skin) && saved.skin >= 0 && saved.skin < SKIN_COUNT ? saved.skin : 0,
@@ -2058,7 +2089,7 @@ io.on('connection', (socket) => {
   byUser.set(user.id, p);
   socket.join(spaceKey(room, user.id, p.city));
   socket.emit('welcome', {
-    needLook: saved.look_done === 0,
+    needLook: saved.look_done === 0 || !p.look2,   // everyone chooses one of the new characters once
     startDay: Math.floor((Number(saved.start_min) || 0) / DAY_MIN),
     id: socket.id,
     username: user.username,
@@ -2097,6 +2128,15 @@ io.on('connection', (socket) => {
     else { p.lookDone = true; q.lookDone.run(p.userId); }
     p.body = l.body; p.eyes = l.eyes; p.skin = l.skin; p.hair = l.hair; p.style = l.style;
     p.faceShape = l.face; q.setLook.run(l.body, l.eyes, l.skin, l.hair, l.style, JSON.stringify(l.face), p.userId);
+  });
+  // New-generation character. Chosen once (the body, man or woman, then stays); the rest can be edited later.
+  socket.on('setLook2', (v) => {
+    const l = cleanLook2(v);
+    if (p.look2) { l.g = p.look2.g; const l2 = cleanLook2(l); Object.assign(l, l2); }   // the body is locked once chosen
+    p.look2 = l;
+    p.body = l.g === 'f' ? 'woman' : 'man';
+    if (!p.lookDone) { p.lookDone = true; q.lookDone.run(p.userId); }
+    q.setLook2.run(JSON.stringify(l), p.body, p.userId);
   });
   // Eye colour: only the listed colours are accepted.
   socket.on('setEyes', (v) => {
@@ -2299,7 +2339,7 @@ io.on('connection', (socket) => {
     if (p.sick) return notice(p, 'You are sick and cannot work. Rest, or buy medicine at the Pharmacy.');
     if (p.burnout) return notice(p, 'You are burned out. Rest, relax, and sleep before working again.');
     if (!job.remote && jobCityOf(p, slot) !== p.city) return notice(p, `This job is in ${CITIES[jobCityOf(p, slot)].name}. Travel there to work.`);
-    if (p.room !== job.room) return notice(p, `Your shifts are at the ${ROOMS[job.room].name}.`);
+    if (p.room !== job.room) return notice(p, `Your shifts are at the ${placeName(p.city, job.room, ROOMS[job.room].name)}.`);
     if (!venueOpen(job.room)) return notice(p, closedText(job.room));
     const now = Date.now();
     const waitMs = p[S.last] + WORK_COOLDOWN_MS - now;
@@ -2361,6 +2401,7 @@ io.on('connection', (socket) => {
     if (p.trip) return notice(p, 'Wait until you arrive.');
     if (p.room !== 'jobs') return notice(p, 'Go to the Jobs Center to apply.');
     if (!venueOpen('jobs')) return notice(p, closedText('jobs'));
+    if (!jobInCity(job, p.city)) return notice(p, `${job.title} is not on offer in ${CITIES[p.city].name}.`);
     if (p.jobId === job.id || p.job2Id === job.id || p.job3Id === job.id) return notice(p, 'That is already your job.');
     if (slotFor(p, job) === null) return notice(p, 'You already have two part-time jobs. Quit one first.');
     const now = Date.now();
@@ -2386,7 +2427,7 @@ io.on('connection', (socket) => {
     p.jobCity[sl] = job.remote ? p.homeCity : p.city;
     p[S.taken] = Date.now();
     p[S.shifts] = 0;
-    notice(p, `You are now a ${job.title}${job.part ? ' (part-time)' : ''}. Shifts are at ${job.remote ? 'Home' : `the ${ROOMS[job.room].name} in ${CITIES[p.jobCity[sl]].name}`}.`);
+    notice(p, `You are now a ${job.title}${job.part ? ' (part-time)' : ''}. Shifts are at ${job.remote ? 'Home' : `the ${placeName(p.jobCity[sl], job.room, ROOMS[job.room].name)} in ${CITIES[p.jobCity[sl]].name}`}.`);
     sendJobs(p);
   }
   socket.on('interviewAnswer', (req) => {
@@ -3534,7 +3575,7 @@ setInterval(() => {
     publicRoomsBy[cityId] = Object.keys(ROOMS).filter((id) => !ROOMS[id].solo && id !== 'biz').map((id) => {
       const open = venueOpen(id);
       return {
-        id, name: ROOMS[id].name, count: occupancy(id, cityId), cap: ROOMS[id].cap,
+        id, name: placeName(cityId, id, ROOMS[id].name), count: occupancy(id, cityId), cap: ROOMS[id].cap,
         open, hours: hoursText(ROOMS[id].hours),
         closesIn: open && ROOMS[id].hours ? Math.round(minutesUntilClose(ROOMS[id].hours, mod)) : null,
       };

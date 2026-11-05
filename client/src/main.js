@@ -10,6 +10,7 @@ import { initWorld } from './worldUi.js';
 import { initLife } from './lifeUi.js';
 import { initSocial } from './socialUi.js';
 import { loadModel, whenModelReady, attachModel, animateModel, applyLook } from './model.js';
+import { decodeLook2 } from './person2.js';
 import { openCreator } from './creator.js';
 import { loadNpc } from './npc.js';
 import { initRadio } from './radio.js';
@@ -342,12 +343,13 @@ socket.on('state', ({ room, players, cars, lvl, cops, ph }) => {
       a.last = new THREE.Vector3(p.x, 0, p.z); a.speed = 0; a.heading = 0;
       a.name = p.name;
       avatars.set(p.id, a);
-      const grp = a.group; const bd = p.b ? 'woman' : 'man'; whenModelReady(() => attachModel(grp, bd));
+      const grp = a.group; const bd = p.b ? 'woman' : 'man'; const v2 = p.v2 ? decodeLook2(p.v2) : null; whenModelReady(() => attachModel(grp, bd, v2));
     }
     a.target.set(p.x, 0, p.z);
-    if (p.id === myId) myLook = { body: p.b ? 'woman' : 'man', eyes: p.e || 'brown', skin: p.s || 0, hair: p.h || 'brown', style: p.y || 'original', face: p.f || null };
-    { const bd = p.b ? 'woman' : 'man'; const gm = a.group.userData.model; if (gm && gm.body !== bd) attachModel(a.group, bd); }
-    applyLook(a.group, { eyes: p.e || 'brown', skin: p.s || 0, hair: p.h || 'brown', style: p.y || 'original', face: p.f });
+    const v2 = p.v2 ? decodeLook2(p.v2) : null;
+    if (p.id === myId && v2) myLook = v2;
+    { const bd = p.b ? 'woman' : 'man'; const gm = a.group.userData.model; if (gm && (gm.body !== bd || (v2 && (!gm.p2 || gm.p2.g !== v2.g)) || (!v2 && gm.p2))) attachModel(a.group, bd, v2); }
+    applyLook(a.group, v2 ? { v2 } : { eyes: p.e || 'brown', skin: p.s || 0, hair: p.h || 'brown', style: p.y || 'original', face: p.f });
     a.group.userData.baseColor = p.color;
     dressAvatar(a.group, p.look, fashionCat);
     a.working = Boolean(p.work);
@@ -366,7 +368,7 @@ socket.on('state', ({ room, players, cars, lvl, cops, ph }) => {
         scene.add(a.veh);
       }
       a.ry = p.ry || 0;
-      a.group.visible = false;
+      a.group.visible = p.ride === 'bike';   // on a motorbike you see the rider; in a car, bus or taxi you are inside
     } else if (a.veh) {
       scene.remove(a.veh);
       a.veh = null;
@@ -712,10 +714,11 @@ $('mapBtn').addEventListener('click', () => {
 $('mapClose').addEventListener('click', () => ($('map').hidden = true));
 
 // ---------- Login, sign-up, password reset, and log out ----------
+const AUTH_PAGES = ['auth', 'signupPage', 'loginPage', 'reset', 'recovery'];
+function showPage(id) { for (const p of AUTH_PAGES) $(p).hidden = p !== id; }
+// With a message (logged out, password changed...) go straight to the login page; otherwise the two-button start screen.
 function showAuth(message = '', good = false) {
-  $('reset').hidden = true;
-  $('recovery').hidden = true;
-  $('auth').hidden = false;
+  showPage(message ? 'loginPage' : 'auth');
   $('authError').textContent = message;
   $('authError').className = good ? 'err good' : 'err';
   $('pass').value = '';
@@ -724,7 +727,7 @@ function showAuth(message = '', good = false) {
 function startSession(t) {
   token = t;
   sessionStorage.setItem(TOKEN_KEY, token);
-  $('auth').hidden = true;
+  for (const p of AUTH_PAGES) $(p).hidden = true;
   socket.connect();
 }
 
@@ -754,14 +757,12 @@ function endSession(message) {
 // The recovery code screen. It is shown once, so the player must press the button to go on.
 let afterCode = null;
 function showRecovery(title, message, code, next) {
-  $('auth').hidden = true;
-  $('reset').hidden = true;
+  showPage('recovery');
   $('recTitle').textContent = title;
   $('recMsg').textContent = message;
   $('codeText').textContent = code;
   $('copyCode').textContent = 'Copy code';
   afterCode = next;
-  $('recovery').hidden = false;
 }
 $('copyCode').addEventListener('click', async () => {
   try {
@@ -790,43 +791,55 @@ async function callApi(path, body) {
 }
 
 // The character is made in the editor: when creating an account, and later from the Look panel.
-let myLook = { body: 'man', eyes: 'brown', skin: 0, hair: 'brown', style: 'original' };
+let myLook = null;   // the new-generation look (set from the snapshot once chosen)
 // Editing later: the body (man or woman) is locked, because it was chosen when the account was made.
 $('lookEdit').addEventListener('click', () => openCreator({
   title: 'Edit your character', initial: myLook, lockBody: true,
-  onSave: (l) => { myLook = l; socket.emit('setLook', l); },
+  onSave: (l) => { myLook = l; socket.emit('setLook2', l); },
 }));
 // A brand-new account makes its character once, right after sign-up; it cannot be skipped.
 function firstLook() {
   openCreator({
     title: 'Create your character', initial: myLook, required: true,
-    onSave: (l) => { myLook = l; socket.emit('setLook', l); },
+    onSave: (l) => { myLook = l; socket.emit('setLook2', l); },
   });
 }
-async function submitAuth(kind) {
+async function submitAuth() {
   const username = $('user').value.trim();
   const password = $('pass').value;
   $('authError').textContent = '';
   try {
-    const { ok, data } = await callApi(`/api/${kind}`, { username, password });
+    const { ok, data } = await callApi('/api/login', { username, password });
     if (!ok) {
       $('authError').className = 'err';
       $('authError').textContent = data.error || 'Something went wrong. Try again.';
       return;
     }
-    if (kind === 'signup') {
-      showRecovery(
-        'Save your recovery code',
-        'If you forget your password, this code is the only way back into your account. Write it down or take a screenshot. It is shown only once.',
-        data.recoveryCode,
-        () => startSession(data.token)
-      );
-    } else {
-      startSession(data.token);
-    }
+    startSession(data.token);
   } catch {
     $('authError').textContent = 'Cannot reach the server. Is it running?';
   }
+}
+
+async function submitSignup() {
+  const username = $('suUser').value.trim(), email = $('suEmail').value.trim(), email2 = $('suEmail2').value.trim(), password = $('suPass').value;
+  const err = (t) => { $('suError').textContent = t; };
+  err('');
+  if (!/^\w{3,16}$/.test(username)) return err('Username must be 3 to 16 letters, numbers, or underscores.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return err('Enter a valid email address.');
+  if (email.toLowerCase() !== email2.toLowerCase()) return err('The two email addresses do not match.');
+  if (password.length < 8) return err('Password must be 8 or more characters.');
+  try {
+    const { ok, data } = await callApi('/api/signup', { username, password, email });
+    if (!ok) return err(data.error || 'Something went wrong. Try again.');
+    $('suPass').value = '';
+    showRecovery(
+      'Save your recovery code',
+      'If you forget your password, this code is another way back into your account (you can also reset it with your email). Write it down or take a screenshot. It is shown only once.',
+      data.recoveryCode,
+      () => startSession(data.token)
+    );
+  } catch { err('Cannot reach the server. Is it running?'); }
 }
 
 async function submitReset() {
@@ -853,16 +866,20 @@ async function submitReset() {
   }
 }
 
-$('login').addEventListener('click', () => submitAuth('login'));
-$('signup').addEventListener('click', () => submitAuth('signup'));
+$('login').addEventListener('click', () => submitAuth());
 $('pass').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') submitAuth('login');
+  if (e.key === 'Enter') submitAuth();
 });
+$('goSignup').addEventListener('click', () => { $('suError').textContent = ''; showPage('signupPage'); });
+$('goLogin').addEventListener('click', () => { $('authError').textContent = ''; showPage('loginPage'); });
+$('suBack').addEventListener('click', () => showPage('auth'));
+$('loginBack').addEventListener('click', () => showPage('auth'));
+$('suGo').addEventListener('click', submitSignup);
+$('suPass').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitSignup(); });
 $('forgot').addEventListener('click', () => {
   $('ruser').value = $('user').value;
   $('resetError').textContent = '';
-  $('auth').hidden = true;
-  $('reset').hidden = false;
+  showPage('reset');
 });
 $('resetBack').addEventListener('click', () => showAuth());
 $('rmail').addEventListener('click', async () => {
@@ -987,7 +1004,7 @@ async function leaveCabin() {
   document.body.classList.remove('seated');
   $('fpvBtn').hidden = Boolean(roomInfoNow && roomInfoNow.city);
   const a = avatars.get(myId);
-  if (a) a.group.visible = !a.veh;
+  if (a) a.group.visible = !a.veh || a.vehKind === 'bike';
   await fade(0, 600);
   cabinBusy = false;
 }
@@ -1010,7 +1027,7 @@ function setSeatView(on) {
   camera.fov = on ? 70 : 45; camera.updateProjectionMatrix();
   seatLook = 0;
   document.body.classList.toggle('driverView', on);
-  if (!on) { if (me) { me.group.visible = !me.veh; if (me.veh) me.veh.visible = true; } snapCam = true; dropCockpit(); }
+  if (!on) { if (me) { me.group.visible = !me.veh || me.vehKind === 'bike'; if (me.veh) me.veh.visible = true; } snapCam = true; dropCockpit(); }
   $('seatBtn').textContent = on ? '🧍 Outside view' : '🚗 Driver view';
   $('seatBtn').classList.toggle('on', on);
 }
@@ -1283,7 +1300,8 @@ renderer.setAnimationLoop(() => {
         const wantReach = street.doorDistance(a.group.position.x, a.group.position.z) < 1.5 ? 1 : 0;
         a.group.userData.reach = (a.group.userData.reach || 0) + (wantReach - (a.group.userData.reach || 0)) * Math.min(1, dt * 8);
       } else a.group.userData.reach = 0;
-      animateModel(a.group, dt, a.speed, a.heading, a.working, tnow, a.sit && !a.veh, a.exercise || 0);
+      const onBike = a.veh && a.vehKind === 'bike';
+      animateModel(a.group, dt, a.speed, onBike ? a.ry : a.heading, a.working && !onBike, tnow, onBike ? 'bike' : a.sit && !a.veh, onBike ? 0 : a.exercise || 0);
     }
     if (a.veh) {
       { const dx = a.group.position.x - a.veh.position.x, dz = a.group.position.z - a.veh.position.z; const dd = Math.hypot(dx, dz); if (dd > 0.001 && dd < 5) spinWheels(a.veh, dd * (dx * Math.sin(a.veh.rotation.y) + dz * Math.cos(a.veh.rotation.y) >= 0 ? 1 : -1)); }

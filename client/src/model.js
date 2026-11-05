@@ -8,7 +8,8 @@ import { CLOTH } from './clothmask.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { applyHairStyle } from './hair.js';
-import { captureRig, poseWork, poseStand, poseSit, poseExercise, exerciseTilt, poseReach } from './rig.js';
+import { attach2, detach2, retarget2, applyLook2, loadPerson2, person2Ready } from './person2.js';
+import { captureRig, poseWork, poseStand, poseSit, poseExercise, exerciseTilt, poseReach, turn, fitForward } from './rig.js';
 
 const BODIES = ['man', 'woman'];
 const HEIGHT = 1.75;   // metres for the man; the woman keeps her size relative to him
@@ -20,7 +21,7 @@ const waiting = new Set();   // avatars made before the models arrived
 
 export function loadModel() {
   if (!loading) {
-    loading = Promise.all(BODIES.map((b) => new GLTFLoader().loadAsync(`/models/people/${b}.glb`).then((g) => { gltfs[b] = g; }))).then(() => {
+    loading = Promise.all([loadPerson2(), ...BODIES.map((b) => new GLTFLoader().loadAsync(`/models/people/${b}.glb`).then((g) => { gltfs[b] = g; }))]).then(() => {
       gltfs.man.scene.updateMatrixWorld(true);
       const bb = new THREE.Box3().setFromObject(gltfs.man.scene, true);
       factor = HEIGHT / (bb.max.y - bb.min.y);
@@ -153,6 +154,12 @@ export function bakeTexture(body, look, src, cloth, tag = '') {
 }
 // Give this person their looks: { eyes, skin, hair }. Safe to call every frame: it only works when something changed.
 export function applyLook(group, look = {}) {
+  if (look.v2) {   // new-generation body: it has its own looks
+    group.userData.lookWant = look;
+    const M2 = group.userData.model;
+    if (M2 && M2.p2) applyLook2(group, look.v2, group.userData.cloth);
+    return;
+  }
   const eyes = Object.hasOwn(EYE_COLOURS, look.eyes) ? look.eyes : 'brown';
   const hair = Object.hasOwn(HAIR_COLOURS, look.hair) ? look.hair : 'brown';
   const skin = Number.isInteger(look.skin) && look.skin >= 0 && look.skin < SKIN_TONES.length ? look.skin : 0;
@@ -179,11 +186,13 @@ export function applyLook(group, look = {}) {
 const mat = (c) => new THREE.MeshStandardMaterial({ color: c });
 
 // Put a model inside this avatar group and hide the simple figure. Calling it again with another body swaps the body.
-export function attachModel(group, body = 'man') {
+export function attachModel(group, body = 'man', look2 = null) {
   if (!ready) return;
+  if (look2) body = look2.g === 'f' ? 'woman' : 'man';
   if (!BODIES.includes(body)) body = 'man';
   if (group.userData.model) {
-    if (group.userData.model.body === body) return;
+    if (group.userData.model.body === body && !!group.userData.model.p2 === !!look2 && (!look2 || group.userData.model.p2.g === look2.g)) return;
+    if (group.userData.model.body === body && look2 && !group.userData.model.p2) { if (person2Ready() && attach2(group, group.userData.model, look2)) applyLook(group, { ...(group.userData.lookWant || {}), v2: look2 }); return; }
     detachModel(group);
   }
   const g = gltfs[body];
@@ -209,6 +218,8 @@ export function attachModel(group, body = 'man') {
   const rig = captureRig(root);
   group.userData.model = { hairMesh: skinned.length > 1 ? skinned[1] : null, root, mixer, actions, cur: 'idle', rig, bones: rig.bones, extras: [], heading: 0, b: 1, body, phase: Math.random() * 6 };
   group.userData.lookKey = null; // dress again
+  if (look2 && person2Ready()) attach2(group, group.userData.model, look2);
+  if (look2) group.userData.lookWant = { ...(group.userData.lookWant || {}), v2: look2 };
   if (group.userData.lookWant) applyLook(group, group.userData.lookWant);
 }
 
@@ -216,6 +227,7 @@ function detachModel(group) {
   const M = group.userData.model;
   if (!M) return;
   for (const m of M.extras) { m.parent && m.parent.remove(m); m.geometry.dispose(); m.material.dispose(); }
+  if (M.p2) detach2(group);
   group.remove(M.root);
   M.root.traverse((o) => { if (o.isMesh) o.material.dispose(); });
   group.userData.model = null;
@@ -240,7 +252,7 @@ export function dressModel(group, look, catalog) {
   if (!acc) return;
   M.root.updateMatrixWorld(true);
   const put = (bone, mesh, x, y, z, rx = 0) => {
-    const b = M.bones[bone];
+    const b = M.p2 ? M.p2.bones[{ Head: 'Head', LeftHand: 'hand_l', Spine: 'spine_03' }[bone]] : M.bones[bone];
     if (!b) return;
     // The bones sit inside an armature that is scaled down (centimetres), so measure the real scale of this bone.
     const k = (factor || 1) / (new THREE.Vector3().setFromMatrixScale(b.matrixWorld).x || 1);
@@ -355,6 +367,10 @@ function syncProps(group, M, style, dt, t) {
 // Called every frame. speed is how fast the person is moving (m/s), heading the way they face,
 // working true while on a shift, sitting true while seated.
 export function animateModel(group, dt, speed, heading, working, t, sitting = false, exercise = 0) {
+  animateOld(group, dt, speed, heading, working, t, sitting, exercise);
+  if (group.userData.model && group.userData.model.p2) retarget2(group);
+}
+function animateOld(group, dt, speed, heading, working, t, sitting = false, exercise = 0) {
   const M = group.userData.model;
   if (!M) return;
   M.root.rotation.order = 'YXZ';
@@ -379,10 +395,27 @@ export function animateModel(group, dt, speed, heading, working, t, sitting = fa
     return;
   }
   if (M.weights && M.weights.length) { for (const w of M.weights) w.parent && w.parent.remove(w); M.weights = []; }
+  if (M.root.position.x !== 0 || M.root.position.z !== 0) { M.root.position.x *= 1 - Math.min(1, dt * 10); M.root.position.z *= 1 - Math.min(1, dt * 10); if (Math.abs(M.root.position.x) + Math.abs(M.root.position.z) < 0.01) M.root.position.x = M.root.position.z = 0; }
   if (M.root.rotation.x !== 0 || M.root.position.y !== 0) { M.root.rotation.x += (0 - M.root.rotation.x) * Math.min(1, dt * 10); M.root.position.y += (0 - M.root.position.y) * Math.min(1, dt * 10); if (Math.abs(M.root.rotation.x) < 0.01) M.root.rotation.x = 0; if (Math.abs(M.root.position.y) < 0.01) M.root.position.y = 0; }
   if (sitting) {
     for (const a of Object.values(M.actions)) a.setEffectiveWeight(0);
     M.mixer.update(dt);
+    if (sitting === 'bike') {
+      // Riding a motorbike: sit on the seat (a little behind the middle), face the way the bike goes, hands on the handlebars.
+      const d = ((heading - M.root.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      M.root.rotation.y += d * Math.min(1, dt * 12);
+      M.root.position.y += (0.42 - M.root.position.y) * Math.min(1, dt * 10);
+      M.root.position.x += (-Math.sin(heading) * 0.18 - M.root.position.x) * Math.min(1, dt * 10);
+      M.root.position.z += (-Math.cos(heading) * 0.18 - M.root.position.z) * Math.min(1, dt * 10);
+      poseSit(M.rig, group, 0.45, 0.45);
+      for (const side of ['Left', 'Right']) {
+        turn(M.rig, side + 'UpLeg', -1.2, 0, side === 'Left' ? -0.2 : 0.2, 1); turn(M.rig, side + 'Leg', 1.1, 0, 0, 1);
+      }
+      if (M.fwd === undefined) M.fwd = fitForward(M.root, M.rig);
+      if (M.fwd) for (const side of ['Left', 'Right']) { turn(M.rig, side + 'Arm', ...M.fwd[side].a, 1); turn(M.rig, side + 'ForeArm', ...M.fwd[side].f, 1); }
+      turn(M.rig, 'Head', -0.2, 0, 0, 1);
+      return;
+    }
     poseSit(M.rig, group, 0.45, 0);
     return;
   }

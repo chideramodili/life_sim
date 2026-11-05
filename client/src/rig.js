@@ -58,8 +58,50 @@ function fitArms(root, rig) {
   return (armCache[key] = out);
 }
 
+// ---- Arms reaching forward ----------------------------------------------------------------------------------------
+// Same idea as fitArms: find, once per model type, the angles that point each arm forward and a little down (for hands on handlebars).
+const fwdCache = {};
+export function fitForward(root, rig, drop = 0.35) {
+  const B = rig.bones, L = rig.rest.LeftArm;
+  if (!L || !B.LeftForeArm || !B.RightForeArm || !B.RightArm || !B.LeftHand || !B.RightHand) return null;
+  const key = [L.e.x, L.e.y, L.e.z, rig.rest.RightArm.e.x, rig.rest.RightArm.e.y, rig.rest.RightArm.e.z, rig.rest.LeftForeArm.e.x, drop].map((n) => (typeof n === 'number' ? n.toFixed(3) : n)).join(',');
+  if (fwdCache[key]) return fwdCache[key];
+  root.updateMatrixWorld(true);
+  _inv.copy(root.matrixWorld).invert();
+  const sideSign = _v1.setFromMatrixPosition(B.LeftArm.matrixWorld).applyMatrix4(_inv).x > _v2.setFromMatrixPosition(B.RightArm.matrixWorld).applyMatrix4(_inv).x ? 1 : -1;
+  const dir = (a, b) => { _v1.setFromMatrixPosition(a.matrixWorld).applyMatrix4(_inv); _v2.setFromMatrixPosition(b.matrixWorld).applyMatrix4(_inv); return _v3.subVectors(_v2, _v1).normalize(); };
+  const out = {};
+  for (const side of ['Left', 'Right']) {
+    const arm = B[side + 'Arm'], fore = B[side + 'ForeArm'], hand = B[side + 'Hand'];
+    const ra = rig.rest[side + 'Arm'].e, rf = rig.rest[side + 'ForeArm'].e;
+    const outward = (side === 'Left' ? 1 : -1) * sideSign;
+    let best = null;
+    for (let dz = -2.6; dz <= 2.6001; dz += 0.1) for (let dx = -2.6; dx <= 2.6001; dx += 0.1) for (let dy = -1.0; dy <= 1.0001; dy += 0.25) {
+      _q.setFromEuler(_e.set(ra.x + dx, ra.y + dy, ra.z + dz, ra.order)); arm.quaternion.copy(_q);
+      arm.updateMatrixWorld(true);
+      const d = dir(arm, fore);
+      const err = Math.abs(d.z - 0.93) + Math.abs(d.y + drop) * 1.2 + Math.abs(d.x * outward - 0.12);
+      if (!best || err < best.err) best = { err, dx, dy, dz };
+    }
+    arm.quaternion.setFromEuler(_e.set(ra.x + best.dx, ra.y + best.dy, ra.z + best.dz, ra.order));
+    arm.updateMatrixWorld(true);
+    let bf = null;
+    for (let fx = -2.0; fx <= 2.0001; fx += 0.1) for (let fz = -0.6; fz <= 0.6001; fz += 0.2) {
+      _q.setFromEuler(_e.set(rf.x + fx, rf.y, rf.z + fz, rf.order)); fore.quaternion.copy(_q);
+      fore.updateMatrixWorld(true);
+      const d = dir(fore, hand);
+      const err = Math.abs(d.z - 0.95) + Math.abs(d.y + drop * 0.6) + Math.abs(d.x * outward - 0.03);
+      if (!bf || err < bf.err) bf = { err, fx, fz };
+    }
+    out[side] = { a: [best.dx, best.dy, best.dz], f: [bf.fx, 0, bf.fz] };
+    arm.quaternion.setFromEuler(_e.set(ra.x, ra.y, ra.z, ra.order)); fore.quaternion.setFromEuler(_e.set(rf.x, rf.y, rf.z, rf.order));
+  }
+  root.updateMatrixWorld(true);
+  return (fwdCache[key] = out);
+}
+
 // Turn a bone to (rest + these angles), blended w of the way from where it is now.
-function turn(rig, name, dx, dy, dz, w) {
+export function turn(rig, name, dx, dy, dz, w) {
   const b = rig.bones[name];
   if (!b || w <= 0) return;
   const r = rig.rest[name].e;

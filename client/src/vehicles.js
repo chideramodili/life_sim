@@ -74,26 +74,9 @@ function makeBoxVehicle(kind) {
     g.add(box(0.28, 0.1, 0.7, dark, 0, 0.9, -0.38));               // seat
     g.add(box(0.5, 0.12, 0.3, frame, 0, 0.72, -0.8));              // rear mudguard
     const fork = box(0.08, 0.8, 0.08, chrome, 0, 0.78, 0.7); fork.rotation.x = -0.3; g.add(fork);
-    g.add(box(0.7, 0.06, 0.06, dark, 0, 1.2, 0.58));               // handlebars
+    g.add(box(0.7, 0.06, 0.06, dark, 0, 1.12, 0.52));               // handlebars
     const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), mat(0xfff2b0, { emissive: 0xfff2b0 })); lamp.position.set(0, 1.08, 0.82); g.add(lamp);
-    const skin = mat(0xb07850), shirt = mat(0xe9742c), jeans = mat(0x2c3e66), helmet = mat(0xf2f2f2);
-    const limb = (a, b, r, m) => {
-      const va = new THREE.Vector3(...a), vb = new THREE.Vector3(...b), len = va.distanceTo(vb);
-      const l = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 8), m);
-      l.position.copy(va).add(vb).multiplyScalar(0.5);
-      l.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), vb.clone().sub(va).normalize());
-      g.add(l);
-    };
-    const torso = box(0.42, 0.62, 0.24, shirt, 0, 1.45, -0.12); torso.rotation.x = 0.45; g.add(torso);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), skin); head.position.set(0, 1.9, 0.1); g.add(head);
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), helmet); cap.position.set(0, 1.93, 0.1); g.add(cap);
-    for (const s of [-1, 1]) {
-      limb([s * 0.22, 1.62, 0.0], [s * 0.27, 1.38, 0.28], 0.06, shirt);   // upper arm
-      limb([s * 0.27, 1.38, 0.28], [s * 0.3, 1.2, 0.58], 0.055, skin);    // forearm to the bars
-      limb([s * 0.13, 1.0, -0.3], [s * 0.15, 0.82, 0.12], 0.09, jeans);   // thigh
-      limb([s * 0.15, 0.82, 0.12], [s * 0.15, 0.5, -0.05], 0.075, jeans); // shin
-      g.add(box(0.1, 0.08, 0.26, dark, s * 0.15, 0.46, 0.02));            // foot
-    }
+    // (the rider is the player's own avatar, seated on the bike by main.js)
   } else {
     // your own car
     const body = mat(0xc0392b);

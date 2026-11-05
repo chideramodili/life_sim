@@ -70,26 +70,30 @@ export function studyRule(skill, mode) {
 export const JOBS = [
   { id: 'shop',       title: 'Shop assistant',          pay: 8000,  room: 'shop',   flag: 'Interview result: offer', skill: 'speaking' },
   { id: 'shop_trial', title: 'Shop assistant (trial)',  pay: 6000,  room: 'shop',   flag: 'Interview result: trial week', skill: 'speaking' },
-  { id: 'rider',      title: 'Delivery rider',          pay: 14000, room: 'market', flag: 'Took the delivery job', skill: 'fitness' },
-  { id: 'seller',     title: 'Craft seller',            pay: 16000, room: 'market', req: { skill: 'crafting', level: 2 } },
-  { id: 'trainer',    title: 'Gym trainer',             pay: 18000, room: 'gym',    req: { skill: 'fitness', level: 3 }, ref: 'Referral: Coach Femi' },
-  { id: 'mc',         title: 'Club MC',                 pay: 25000, room: 'club',   req: { skill: 'speaking', level: 4 }, ref: 'Referral: DJ Tunde' },
+  { id: 'rider',      title: 'Delivery rider',          pay: 14000, room: 'market', flag: 'Took the delivery job', skill: 'fitness', cities: ['lagos', 'abuja'] },
+  { id: 'seller',     title: 'Craft seller',            pay: 16000, room: 'market', req: { skill: 'crafting', level: 2 }, cities: ['lagos', 'enugu'] },
+  { id: 'trainer',    title: 'Gym trainer',             pay: 18000, room: 'gym',    req: { skill: 'fitness', level: 3 }, ref: 'Referral: Coach Femi', cities: ['lagos', 'abuja', 'enugu'] },
+  { id: 'mc',         title: 'Club MC',                 pay: 25000, room: 'club',   req: { skill: 'speaking', level: 4 }, ref: 'Referral: DJ Tunde', cities: ['lagos'] },
   { id: 'dev_jr',     title: 'Junior web developer',    pay: 30000, room: 'home',   remote: true, laptop: 1, req: { skill: 'coding', level: 3 } },
   { id: 'dev_sr',     title: 'Senior web developer',    pay: 60000, room: 'home',   remote: true, laptop: 2, req: { skill: 'coding', level: 7 } },
   // Starter jobs: nothing needed to apply, so every new player has real choices. They pay less than the skilled jobs.
   { id: 'cleaner',    title: 'Cleaner',                 pay: 5000,  room: 'plaza',   part: true, skill: 'crafting' },
   { id: 'cashier',    title: 'Cashier',                 pay: 6500,  room: 'market',  part: true, skill: 'speaking' },
   { id: 'guard',      title: 'Security guard',          pay: 7000,  room: 'bank',    skill: 'fitness' },
-  { id: 'waiter',     title: 'Waiter',                  pay: 6000,  room: 'club', hours: { open: 20, close: 5 }, part: true, skill: 'speaking' },
+  { id: 'waiter',     title: 'Waiter',                  pay: 6000,  room: 'club', hours: { open: 20, close: 5 }, part: true, skill: 'speaking', cities: ['lagos', 'abuja'] },
   { id: 'attendant',  title: 'Pharmacy attendant',      pay: 7500,  room: 'pharmacy', part: true, skill: 'speaking' },
-  { id: 'mechanic_h', title: 'Mechanic helper',         pay: 9000,  room: 'garage',  skill: 'crafting' },
+  { id: 'mechanic_h', title: 'Mechanic helper',         pay: 9000,  room: 'garage',  skill: 'crafting', cities: ['lagos', 'enugu'] },
   { id: 'gym_desk',   title: 'Gym front desk',          pay: 7000,  room: 'gym',     part: true, skill: 'fitness' },
   { id: 'shelver',    title: 'Library shelver',         pay: 5500,  room: 'library', part: true },
   // Hidden jobs: they only appear on the board after someone refers you (see social.js).
-  { id: 'stall',      title: 'Market stall helper',     pay: 20000, room: 'market',   flag: 'Referral: Mama Nkechi', hidden: true, skill: 'speaking' },
-  { id: 'clinic',     title: 'Clinic aide',             pay: 22000, room: 'pharmacy', flag: 'Referral: Dr. Amaka', hidden: true },
-  { id: 'tutor',      title: 'Library tutor',           pay: 26000, room: 'library',  flag: 'Referral: Mrs. Adaobi', hidden: true, skill: 'speaking' },
-  { id: 'runner',     title: 'Night runner',            pay: 40000, room: 'plaza',    flag: 'Underground: Big Ade', hidden: true, underground: true, skill: 'fitness', rep: -1, hours: { open: 20, close: 5 }, stress: 15 },
+  { id: 'stall',      title: 'Market stall helper',     pay: 20000, room: 'market',   flag: 'Referral: Mama Nkechi', hidden: true, skill: 'speaking', cities: ['lagos'] },
+  { id: 'clinic',     title: 'Clinic aide',             pay: 22000, room: 'pharmacy', flag: 'Referral: Dr. Amaka', hidden: true, cities: ['abuja', 'lagos'] },
+  { id: 'tutor',      title: 'Library tutor',           pay: 26000, room: 'library',  flag: 'Referral: Mrs. Adaobi', hidden: true, skill: 'speaking', cities: ['abuja', 'enugu', 'lagos'] },
+  // Jobs only some cities post (see `cities`). A job with no `cities` is offered everywhere.
+  { id: 'hotel_clerk',  title: 'Hotel receptionist',    pay: 11000, room: 'hotel',       skill: 'speaking', cities: ['abuja', 'lagos'] },
+  { id: 'event_usher',  title: 'Event Centre usher',    pay: 9000,  room: 'eventcenter', part: true, skill: 'speaking', cities: ['abuja', 'lagos'] },
+  { id: 'market_porter', title: 'Market porter',        pay: 8500,  room: 'market',      part: true, skill: 'fitness', cities: ['enugu'] },
+  { id: 'runner',     title: 'Night runner',            pay: 40000, room: 'plaza',    flag: 'Underground: Big Ade', hidden: true, underground: true, skill: 'fitness', rep: -1, hours: { open: 20, close: 5 }, stress: 15, cities: ['lagos'] },
 ];
 // You can hold one main job and one part-time job (job.part). Each has its own shift cooldown.
 // A shift now takes real time: you stay at work, doing it, until it is over.
@@ -115,6 +119,8 @@ export function perkOf(job, skills) {
 
 // Employers will not hire someone whose reputation is below this. The underground job does not care.
 export const JOB_MIN_REP = -40;
+// Does this city post this job?
+export const jobInCity = (job, city) => !job.cities || job.cities.includes(city);
 export const jobById = (id) => (typeof id === 'string' ? JOBS.find((j) => j.id === id) || null : null);
 
 // Can this player take this job? "flags" are the story results plus any referrals. Returns { ok, why }.

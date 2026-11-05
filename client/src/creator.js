@@ -2,47 +2,41 @@
 // It opens when you create an account and again from the Look panel. It only edits a look object; the caller saves it.
 // Categories with `parts` need separate head and hair pieces from Blender; until those arrive they show a "coming" note.
 import * as THREE from 'three';
-import { STYLES } from './hair.js';
-import { dressModel, loadModel, whenModelReady, attachModel, applyLook, animateModel, EYE_COLOURS, HAIR_COLOURS, SKIN_TONES, FACE_KEYS } from './model.js';
+import { dressModel, loadModel, whenModelReady, attachModel, applyLook, animateModel } from './model.js';
+import { SKIN2, EYES2, HAIRCOL2, HAIRSTYLES2, BEARDS2, DEFAULT_LOOK2, cleanLook2 } from './person2.js';
 
-const BASE_SKIN = [224, 172, 142];   // roughly the model's own skin, for the colour dots
-const dotSkin = (t) => `rgb(${BASE_SKIN.map((c, i) => Math.min(255, Math.round(c * t[i]))).join(',')})`;
-const HAIR_DOT = { brown: '#4a2f1d', black: '#2a2523', chestnut: '#7a4a2a', auburn: '#8a3a22', ginger: '#c0592a', blonde: '#cfa75a', grey: '#8f8f93', white: '#d8d6d0' };
 const EYE_DOT = { brown: '#5a3a22', hazel: '#9a7b2f', green: '#3f8f4f', blue: '#3a7bd5', grey: '#8d9aa6', amber: '#c9822b' };
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
+const STYLE_ICON = { none: '🥚', buzzed: '🪒', buzzedf: '🪒', parted: '💈', buns: '🍙', long: '💁‍♀️' };
 
-// The tabs. `view` is where the camera goes: 'face' for head choices, 'body' for the whole person.
+// The tabs. `view` is where the camera goes: 'face' for head choices, 'body' for the whole person. `only` limits a tab to one body.
 export const CATEGORIES = [
-  { id: 'body', label: 'Body', icon: '🧍', view: 'body' },
+  { id: 'g', label: 'Body', icon: '🧍', view: 'body' },
   { id: 'skin', label: 'Skin', icon: '🎨', view: 'face' },
-  { id: 'hair', label: 'Hair colour', icon: '💇', view: 'face' },
+  { id: 'hs', label: 'Hairstyle', icon: '✂️', view: 'face' },
+  { id: 'hc', label: 'Hair colour', icon: '💇', view: 'face' },
   { id: 'eyes', label: 'Eyes', icon: '👁️', view: 'face' },
-  { id: 'style', label: 'Hairstyle', icon: '✂️', view: 'face' },
+  { id: 'bd', label: 'Beard', icon: '🧔', view: 'face', only: 'm' },
+  { id: 'size', label: 'Size', icon: '📏', view: 'body', sliders: [['ht', 'Height'], ['bl', 'Build']] },
   { id: 'brows', label: 'Brows', icon: '〰️', view: 'face', parts: 'Eyebrow shapes' },
-  { id: 'nose', label: 'Nose', icon: '👃', view: 'face', sliders: [['noseW', 'Nose width'], ['noseL', 'Nose length']] },
-  { id: 'lips', label: 'Lips', icon: '👄', view: 'face', sliders: [['lipFull', 'Lip fullness'], ['mouthW', 'Mouth width']] },
-  { id: 'face', label: 'Face', icon: '🙂', view: 'face', sliders: [['jawW', 'Jaw width'], ['chinL', 'Chin length'], ['faceW', 'Face width']] },
-  { id: 'beard', label: 'Facial hair', icon: '🧔', view: 'face', parts: 'Beards and moustaches' },
 ];
 
-function optionsFor(cat) {
-  if (cat === 'body') return [{ v: 'man', text: 'Man', icon: '🧍‍♂️' }, { v: 'woman', text: 'Woman', icon: '🧍‍♀️' }];
-  if (cat === 'skin') return SKIN_TONES.map((t, i) => ({ v: i, text: `Skin tone ${i + 1}`, dot: dotSkin(t) }));
-  if (cat === 'hair') return Object.keys(HAIR_COLOURS).map((id) => ({ v: id, text: cap(id), dot: HAIR_DOT[id] }));
-  if (cat === 'style') return Object.entries(STYLES).map(([id, text]) => ({ v: id, text, icon: { original: '💇', bald: '🥚', buzz: '🪒', low: '💈', curls: '➰', afro: '🌀', cornrows: '〰️', braids: '🪢', locs: '🧶', knots: '🍥', bun: '🍙', ponytail: '🎀', puffs: '☁️' }[id] }));
-  if (cat === 'eyes') return Object.keys(EYE_COLOURS).map((id) => ({ v: id, text: cap(id), dot: EYE_DOT[id] }));
+function optionsFor(cat, look) {
+  if (cat === 'g') return [{ v: 'm', text: 'Man', icon: '🧍‍♂️' }, { v: 'f', text: 'Woman', icon: '🧍‍♀️' }];
+  if (cat === 'skin') return SKIN2.map((c, i) => ({ v: i, text: `Skin tone ${i + 1}`, dot: c }));
+  if (cat === 'hc') return Object.keys(HAIRCOL2).map((id) => ({ v: id, text: cap(id), dot: HAIRCOL2[id] }));
+  if (cat === 'hs') return HAIRSTYLES2[look.g].map((h) => ({ v: h.id, text: h.name, icon: STYLE_ICON[h.id] || '💇' }));
+  if (cat === 'bd') return BEARDS2.map((b) => ({ v: b.id, text: b.name, icon: b.id === 'none' ? '🙂' : '🧔' }));
+  if (cat === 'eyes') return Object.keys(EYES2).map((id) => ({ v: id, text: cap(id), dot: EYE_DOT[id] }));
   return [];
 }
-const KEY = { body: 'body', skin: 'skin', hair: 'hair', eyes: 'eyes', style: 'style' };
 
-// Open the editor. opts: { initial: {body, eyes, skin, hair}, onSave(look), title }. Returns { close }.
+// Open the editor. opts: { initial: look2 or null, onSave(look2), title, lockBody, required }. Returns { close }.
 export function openCreator(opts) {
-  const start = { body: 'man', eyes: 'brown', skin: 0, hair: 'brown', face: null, ...(opts.initial || {}) };
-  start.style = start.style || 'original';
-  let look = { ...start };
+  let look = cleanLook2({ ...DEFAULT_LOOK2, ...(opts.initial || {}) });
   const undo = [], redo = [];
-  const cats = CATEGORIES.filter((c) => !(opts.lockBody && c.id === 'body'));
-  let cat = cats[0].id, view = cats[0].view;
+  const shown = () => CATEGORIES.filter((c) => !(opts.lockBody && c.id === 'g') && (!c.only || c.only === look.g));
+  let cat = shown()[0].id, view = shown()[0].view;
 
   const root = document.createElement('div');
   root.id = 'creator';
@@ -90,8 +84,8 @@ export function openCreator(opts) {
   function build() {
     whenModelReady(() => {
       if (!alive) return;
-      attachModel(group, look.body);
-      applyLook(group, look);
+      attachModel(group, null, look);
+      applyLook(group, { v2: look });
     });
   }
   loadModel().then(build);
@@ -113,19 +107,20 @@ export function openCreator(opts) {
 
   // --- the editor UI ---
   const tabs = $('.crTabs'), grid = $('.crGrid');
-  for (const c of cats) {
-    const b = document.createElement('button');
-    b.type = 'button'; b.dataset.cat = c.id; b.className = 'crTab';
-    b.innerHTML = `<span class="crIc">${c.icon}</span><span>${c.label}</span>`;
-    b.addEventListener('click', () => select(c.id));
-    tabs.append(b);
+  function renderTabs() {
+    tabs.replaceChildren();
+    for (const c of shown()) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.dataset.cat = c.id; b.className = 'crTab' + (c.id === cat ? ' on' : '');
+      b.innerHTML = `<span class="crIc">${c.icon}</span><span>${c.label}</span>`;
+      b.addEventListener('click', () => select(c.id));
+      tabs.append(b);
+    }
   }
   function select(id) {
     cat = id;
-    const c = CATEGORIES.find((x) => x.id === id);
-    view = c.view;
-    for (const b of tabs.children) b.classList.toggle('on', b.dataset.cat === id);
-    renderGrid();
+    view = CATEGORIES.find((x) => x.id === id).view;
+    renderTabs(); renderGrid();
   }
   function renderGrid() {
     grid.replaceChildren();
@@ -136,43 +131,42 @@ export function openCreator(opts) {
       grid.append(n); return;
     }
     if (c.sliders) {
-      const cur = () => (Array.isArray(look.face) ? look.face.slice() : new Array(FACE_KEYS.length).fill(0));
       for (const [key, label] of c.sliders) {
-        const idx = FACE_KEYS.indexOf(key), row = document.createElement('label'); row.className = 'crSlide';
-        row.innerHTML = `<span>${label}</span><input type="range" min="-3" max="3" step="1" value="${cur()[idx] || 0}"><em>${cur()[idx] || 0}</em>`;
+        const row = document.createElement('label'); row.className = 'crSlide';
+        row.innerHTML = `<span>${label}</span><input type="range" min="-2" max="2" step="1" value="${look[key] || 0}"><em>${look[key] || 0}</em>`;
         const inp = row.querySelector('input'), val = row.querySelector('em');
         let before = null;
         inp.addEventListener('input', () => {   // live preview while dragging; one undo step per drag
           if (!before) before = look;
-          const f = cur(); f[idx] = Number(inp.value); val.textContent = String(f[idx]);
-          look = { ...look, face: f }; applyLook(group, look);
+          look = cleanLook2({ ...look, [key]: Number(inp.value) }); val.textContent = String(look[key]); applyLook(group, { v2: look });
         });
         inp.addEventListener('change', () => { if (before) { undo.push(before); redo.length = 0; before = null; $('.crUndo').disabled = false; $('.crRedo').disabled = true; } });
         grid.append(row);
       }
-      const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'crReset'; reset.textContent = 'Reset these';
-      reset.addEventListener('click', () => { const f = cur(); for (const [k] of c.sliders) f[FACE_KEYS.indexOf(k)] = 0; change({ face: f }); });
+      const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'crReset'; reset.textContent = 'Reset size';
+      reset.addEventListener('click', () => change({ ht: 0, bl: 0 }));
       grid.append(reset);
       return;
     }
-    for (const o of optionsFor(cat)) {
+    for (const o of optionsFor(cat, look)) {
       const b = document.createElement('button');
-      b.type = 'button'; b.className = 'crOpt' + (look[KEY[cat]] === o.v ? ' on' : ''); b.dataset.v = String(o.v); b.title = o.text;
+      b.type = 'button'; b.className = 'crOpt' + (look[cat] === o.v ? ' on' : ''); b.dataset.v = String(o.v); b.title = o.text;
       if (o.dot) { b.classList.add('dotOpt'); const d = document.createElement('span'); d.style.background = o.dot; b.append(d); }
       else b.innerHTML = `<span class="crBig">${o.icon}</span><em>${o.text}</em>`;
       b.setAttribute('aria-label', o.text);
-      b.addEventListener('click', () => change({ [KEY[cat]]: o.v }));
+      b.addEventListener('click', () => change({ [cat]: o.v }));
       grid.append(b);
     }
   }
   function refresh() {
-    renderGrid();
+    if (!shown().some((c) => c.id === cat)) { cat = shown()[0].id; view = shown()[0].view; }
+    renderTabs(); renderGrid();
     $('.crUndo').disabled = !undo.length; $('.crRedo').disabled = !redo.length;
-    attachModel(group, look.body);   // does nothing when the body is unchanged
-    applyLook(group, look);
+    attachModel(group, null, look);   // swaps the body only when man / woman changed
+    applyLook(group, { v2: look });
   }
   function change(patch) {
-    const next = { ...look, ...patch };
+    const next = cleanLook2({ ...look, ...patch });
     if (JSON.stringify(next) === JSON.stringify(look)) return;
     undo.push(look); redo.length = 0; look = next; refresh();
   }
@@ -189,7 +183,7 @@ export function openCreator(opts) {
   $('.crSave').addEventListener('click', () => { const l = { ...look }; close(); if (opts.onSave) opts.onSave(l); });
 
   if (opts.required) $('.crX').hidden = true;
-  select(cat); refresh();
+  refresh();
   requestAnimationFrame(() => { resize(); raf = requestAnimationFrame(frame); });
   return { close, current: () => ({ ...look }) };
 }

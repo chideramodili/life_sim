@@ -161,7 +161,7 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
 #chatForm { display: flex; gap: 6px; margin-top: 8px; }
 #chatInput { flex: 1; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 10px; border: 0.5px solid var(--line); border-radius: 10px; background: var(--bg2); color: var(--text); font-size: calc(16px * var(--fs)); }
 /* Login, forgot password, and recovery code screens */
-    #auth, #reset, #recovery { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(320px, 88vw); padding: 20px; z-index: 10; box-sizing: border-box; }
+    #auth, #signupPage, #loginPage, #reset, #recovery { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(320px, 88vw); padding: 20px; z-index: 10; box-sizing: border-box; }
 .logo { font-size: calc(22px * var(--fs)); font-weight: 700; letter-spacing: 2px; color: var(--hi); text-align: center; }
 .sub { text-align: center; color: var(--muted); margin: 4px 0 16px; font-size: calc(13px * var(--fs)); }
 .field {
@@ -683,14 +683,31 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
 
   <div id="auth" class="panel" hidden>
     <div id="logoAuth" class="brand"></div>
-    <div class="sub">Log in, or create an account</div>
-    <div class="jlabel" style="margin-top:6px">New here? Make your character</div>
-    <input id="user" class="field" placeholder="Username" autocomplete="username" maxlength="16" />
-    <input id="pass" class="field" type="password" placeholder="Password (8 or more characters)" autocomplete="current-password" maxlength="100" />
+    <button id="goSignup" class="big">Create account</button>
+    <button id="goLogin" class="alt">Log in</button>
+  </div>
+
+  <div id="signupPage" class="panel" hidden>
+    <div class="logo" style="font-size:18px;">CREATE ACCOUNT</div>
+    <div class="sub">You will design your character next</div>
+    <input id="suUser" class="field" placeholder="Username (3 to 16 letters or numbers)" autocomplete="username" maxlength="16" />
+    <input id="suEmail" class="field" type="email" placeholder="Email address" autocomplete="email" maxlength="254" />
+    <input id="suEmail2" class="field" type="email" placeholder="Type your email again" autocomplete="off" maxlength="254" />
+    <input id="suPass" class="field" type="password" placeholder="Password (8 or more characters)" autocomplete="new-password" maxlength="100" />
+    <div id="suError" class="err"></div>
+    <button id="suGo" class="big">Create account</button>
+    <button id="suBack" class="link">Back</button>
+  </div>
+
+  <div id="loginPage" class="panel" hidden>
+    <div class="logo" style="font-size:18px;">LOG IN</div>
+    <div class="sub">Use your username or your email</div>
+    <input id="user" class="field" placeholder="Username or email" autocomplete="username" maxlength="254" />
+    <input id="pass" class="field" type="password" placeholder="Password" autocomplete="current-password" maxlength="100" />
     <div id="authError" class="err"></div>
     <button id="login" class="big">Log in</button>
-    <button id="signup" class="alt">Create account</button>
     <button id="forgot" class="link">Forgot password?</button>
+    <button id="loginBack" class="link">Back</button>
   </div>
 
   <div id="reset" class="panel" hidden>

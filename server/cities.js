@@ -5,21 +5,26 @@
 export const CITIES = {
   lagos: {
     id: 'lagos', name: 'Lagos', seed: 20260, order: 0,
+    places: { market: 'Balogun Market', club: 'Island Night Club', hotel: 'Eko Grand Hotel', eventcenter: 'Lagoon Event Centre' },
     theme: { grass: '#4f7a3a', tints: ['#ffffff', '#f3e3d0', '#dfe9f2', '#f2d9d0', '#e6f0dc', '#e9e2f4'],
       look: { pave: '#a8a39a', road: '#3a3a3f', roof: '#8a3f30', parks: ['#4f8a3c', '#5f9a48', '#6aa44f'], hscale: {}, landmarks: ['lagoon'] } },
   },
   abuja: {
     id: 'abuja', name: 'Abuja', seed: 41001, order: 1,
+    places: { market: 'Wuse Market', club: 'Maitama Lounge', hotel: 'Aso Grand Hotel', eventcenter: 'Unity Event Centre' },
     theme: { grass: '#5d8f45', tints: ['#ffffff', '#f4efe6', '#e8eef2', '#eeeeee', '#f6f1dc', '#e3ece4'],
       look: { pave: '#ddd8cc', road: '#2c2f36', roof: '#ece6d6', parks: ['#3f9a47', '#56b050', '#69bb5a'], hscale: { tower: 0.7, office: 0.75, apt: 0.85 }, landmarks: ['rock', 'domes'], lots: { max: 20, gap: 12 } } },
   },
   enugu: {
     id: 'enugu', name: 'Enugu', seed: 77013, order: 2,
+    places: { market: 'Ogbete Market', club: 'Coal City Club', hotel: 'Hilltop Hotel', eventcenter: 'Miners Event Centre' },
     theme: { grass: '#7d8a3c', tints: ['#f0d9c0', '#e8c9a8', '#d9e4d0', '#f2e0cc', '#cfdde8', '#e9d4c4'],
       look: { pave: '#b88a68', road: '#4a3f3b', roof: '#a23c20', parks: ['#6a9a3a', '#86a944', '#9ab04c'], hscale: { tower: 0.5, office: 0.6, apt: 0.8 }, landmarks: ['hills', 'headframe'], lots: { max: 24, gap: 12 } } },
   },
 };
 export const CITY_IDS = Object.keys(CITIES);
+// A place's name in a city (Lagos' market is Balogun Market, Abuja's is Wuse Market...). Falls back to the plain name.
+export const placeName = (city, id, plain) => (CITIES[city] && CITIES[city].places && CITIES[city].places[id]) || plain;
 export const DEFAULT_CITY = 'lagos';
 export const isCity = (id) => typeof id === 'string' && Object.hasOwn(CITIES, id);
 export const parseCity = (id) => (isCity(id) ? id : DEFAULT_CITY);
