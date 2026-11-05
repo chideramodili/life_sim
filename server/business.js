@@ -4,14 +4,16 @@
 
 export const MAX_LOTS = Number(process.env.MAX_LOTS) || 3;          // most lots one player can own
 export const SELL_LAND = 0.6;       // selling a lot back pays 60% of its price
-export const BIZ_MAX_LEVEL = 3;
-export const UPGRADE_COST = { 2: 90000, 3: 220000 };   // cost to reach that level
-export const STOCK_CAP = (level) => 40 * level;
-export const RATE_MULT = (level) => 1 + 0.6 * (level - 1);      // more customers at higher levels
-export const PRICE_MULT = (level) => 1 + 0.15 * (level - 1);    // and a bit more per sale
+export const BIZ_MAX_LEVEL = 4;     // level 4 is Automation: same strength as level 3, but it runs itself
+export const UPGRADE_COST = { 2: 90000, 3: 220000, 4: 600000 };   // cost to reach that level
+const eff = (level) => Math.min(level, 3);   // levels 1-3 make the shop stronger; level 4 adds automation on top of level 3
+export const isAuto = (b) => b.level >= 4;
+export const STOCK_CAP = (level) => 40 * eff(level);
+export const RATE_MULT = (level) => 1 + 0.6 * (eff(level) - 1);      // more customers at higher levels
+export const PRICE_MULT = (level) => 1 + 0.15 * (eff(level) - 1);    // and a bit more per sale
 export const STAFF_WAGE = Number(process.env.STAFF_WAGE) || 2400;   // per staff member per real hour of opening time, paid from the till
 export const STAFF_BOOST = 0.4;                                      // each staff member adds 40% more customers
-export const STAFF_MAX = (level) => level + 1;                       // 2, 3 or 4 staff by level
+export const STAFF_MAX = (level) => eff(level) + 1;                       // 2, 3 or 4 staff by level
 export const HIRE_FEE = 3000;                                        // one-off fee to hire
 export const BIZ_RATE = Number(process.env.BIZ_RATE) || 1;      // 1 = normal; tests turn it up
 
@@ -62,6 +64,24 @@ export function step(b, dtSec, open) {
   if (b.stock <= 0) b.frac = 0;
   return n;
 }
+
+// Automation (level 4): the till restocks the shop when it is half empty, wages are paid from the till as before, and the
+// profit above a safe reserve is sent to the owner. Returns { bought, send } and the caller moves the money.
+export const AUTO_MIN_SEND = 3000;
+export function autoStep(b) {
+  const K = KINDS[b.kind], cap = STOCK_CAP(b.level);
+  let bought = 0;
+  if (b.stock <= cap / 2) {
+    const n = Math.min(cap - b.stock, Math.floor(b.till / K.cost));
+    if (n > 0) { b.stock += n; b.till -= n * K.cost; bought = n; }
+  }
+  const reserve = Math.ceil(cap / 2) * K.cost + STAFF_WAGE * (b.staff || 0) * 2;   // keeps the next restock and two hours of wages
+  const extra = Math.floor(b.till - reserve);
+  return { bought, send: extra >= AUTO_MIN_SEND ? extra : 0 };
+}
+
+// What a built business is worth to its owner when selling (build cost plus the upgrades paid for).
+export const buildingValue = (b) => KINDS[b.kind].build + Object.entries(UPGRADE_COST).filter(([lv]) => Number(lv) <= b.level).reduce((a, [, c]) => a + c, 0);
 
 // Buying stock. Returns { ok, why } or { ok, n, cost }.
 export function buyStock(b, n, cash) {

@@ -18,6 +18,7 @@ export function initBiz(socket) {
   let openId = -1;
   let tick = 0;
   let nameDraft = '';
+  let askDraft = '';
 
   const apply = () => { if (streetApi && lastLots) streetApi.setLots(lastLots.list); };
 
@@ -30,7 +31,7 @@ export function initBiz(socket) {
     const row = el('div', 'job');
     const btn = (text, cls, fn, disabled = false) => { const b = el('button', cls, text); b.disabled = disabled; b.addEventListener('click', fn); return b; };
     if (!i.owner) {
-      row.append(el('div', 'skillName', `Empty lot #${i.id + 1}`), el('div', 'billWho', `Price ₦${fmt(i.price)}. You own ${i.owned} of ${i.max} lots allowed.`));
+      row.append(el('div', 'skillName', `Empty lot #${i.id + 1}`), el('div', 'billWho', `Price ₦${fmt(i.price)} today. Land gains value as lots run out and as time passes. You own ${i.owned} of ${i.max} lots allowed.`));
       row.append(btn(`Buy for ₦${fmt(i.price)}`, 'mini hot billPay', () => socket.emit('lotBuy', i.id)));
     } else if (i.mine && !i.biz) {
       row.append(el('div', 'skillName', `Your lot #${i.id + 1}`), el('div', 'billWho', 'Name your business, then pick what to build.'));
@@ -38,21 +39,24 @@ export function initBiz(socket) {
       inp.addEventListener('input', () => { nameDraft = inp.value; });
       row.append(inp);
       for (const k of i.kinds) row.append(btn(`${k.label} · ₦${fmt(k.build)} (sells ${k.item.toLowerCase()}s at ₦${fmt(k.price)})`, 'mini hot billPay', () => socket.emit('bizBuild', { id: i.id, kind: k.id, name: nameDraft })));
-      row.append(btn(`Sell the lot back (₦${fmt(i.sell)})`, 'mini billPay', () => socket.emit('lotSell', i.id)));
+      row.append(btn(`Sell the lot to the game (₦${fmt(i.sell)})`, 'mini billPay', () => socket.emit('lotSell', i.id)));
+      marketRow(row, i, btn);
     } else if (i.mine && i.biz) {
       const b = i.biz;
       const head = el('div', 'skillHead');
-      head.append(el('span', 'skillName', `${b.name} · ${b.label}`), el('span', 'tagc', `Level ${b.level}`));
+      head.append(el('span', 'skillName', `${b.name} · ${b.label}`), el('span', 'tagc', b.auto ? 'Automated ★' : `Level ${b.level}`));
       row.append(head, el('div', 'billWho', `${b.open ? 'Open now' : 'Closed now'} (${b.hours[0]}:00 to ${b.hours[1]}:00). Stock ${b.stock}/${b.cap}. Till ₦${fmt(b.till)}.`));
       row.append(el('div', 'billWho', `Customers pay ₦${fmt(b.price)} per ${b.item.toLowerCase()}. Each costs you ₦${fmt(b.cost)} from the wholesaler.`));
+      if (b.auto) row.append(el('div', 'billWho', 'Automated: it restocks itself from the till when stock is half empty, pays its team from the till, and sends the profit to your wallet.'));
       row.append(el('div', 'billWho', `Team ${b.staff}/${b.staffMax}. Each adds ${b.boost}% more customers and costs ₦${fmt(b.wage)} an hour while open, paid from the till${b.owed > 0 ? ` (₦${fmt(b.owed)} unpaid)` : ''}.`));
       row.append(btn(`Hire someone · ₦${fmt(b.hireFee)}`, 'mini billPay', () => socket.emit('bizHire', i.id), b.staff >= b.staffMax));
       row.append(btn('Let one go', 'mini billPay', () => socket.emit('bizFire', i.id), b.staff <= 0));
       row.append(btn('Order 10', 'mini billPay', () => socket.emit('bizStock', { id: i.id, n: 10 })));
       row.append(btn('Fill the storeroom', 'mini billPay', () => socket.emit('bizStock', { id: i.id, n: b.cap - b.stock })));
       row.append(btn(`Collect ₦${fmt(b.till)}`, 'mini hot billPay', () => socket.emit('bizCollect', i.id), b.till <= 0));
-      if (b.upgrade) row.append(btn(`Upgrade to level ${b.level + 1} · ₦${fmt(b.upgrade)}`, 'mini billPay', () => socket.emit('bizUpgrade', i.id)));
-      row.append(btn(`Sell the lot and business (₦${fmt(i.sell)} plus the till)`, 'mini billPay', () => socket.emit('lotSell', i.id)));
+      if (b.upgrade) row.append(btn(b.level + 1 >= b.maxLevel ? `Automate · ₦${fmt(b.upgrade)} (restocks itself, pays staff, sends you the profit)` : `Upgrade to level ${b.level + 1} · ₦${fmt(b.upgrade)}`, 'mini billPay', () => socket.emit('bizUpgrade', i.id)));
+      row.append(btn(`Sell to the game (₦${fmt(i.sell)} plus the till)`, 'mini billPay', () => socket.emit('lotSell', i.id)));
+      marketRow(row, i, btn);
     } else if (i.biz) {
       const b = i.biz;
       const head = el('div', 'skillHead');
@@ -63,6 +67,19 @@ export function initBiz(socket) {
       row.append(el('div', 'skillName', `${i.owner}'s lot`), el('div', 'billWho', 'Nothing is built here yet.'));
     }
     body.append(row);
+  }
+
+  // Selling to another player: set a price, they buy it from the Properties app. The game keeps a small fee.
+  function marketRow(row, i, btn) {
+    if (i.ask) {
+      row.append(el('div', 'billWho', `Listed for players at ₦${fmt(i.ask)}.`));
+      row.append(btn('Take it off the market', 'mini billPay', () => socket.emit('lotAsk', { id: i.id, ask: 0 })));
+      return;
+    }
+    row.append(el('div', 'billWho', `Worth about ₦${fmt(i.value)} today. Sell to another player and set your own price (they pay it, you get it minus 5%).`));
+    const inp = el('input'); inp.type = 'number'; inp.inputMode = 'numeric'; inp.min = 0; inp.placeholder = `Asking price, e.g. ${fmt(i.value)}`; inp.value = askDraft;
+    inp.addEventListener('input', () => { askDraft = inp.value; });
+    row.append(inp, btn('List for sale to players', 'mini billPay', () => socket.emit('lotAsk', { id: i.id, ask: Number(askDraft) })));
   }
 
   $('bizBtn').addEventListener('click', () => {

@@ -170,3 +170,12 @@ export function carThumb(name) {
   thumbCache.set(name, url);
   return url;
 }
+
+// Where the driver sits in each car, in the car's own frame: x to the driver's side (the left), z forward from the middle, y up.
+// (Measured by looking at each model from above; a model not listed gets a sensible default.)
+export const DRIVER_SEAT = {
+  coupe70: { x: 0.36, z: -0.05, y: 0.0 }, taxi90: { x: 0.38, z: -0.1, y: 0.0 }, pickup50: { x: 0.38, z: 0.1, y: 0.05 },
+  roadster50: { x: 0.36, z: -0.1, y: 0.0 }, taxi: { x: 0.38, z: -0.05, y: 0.0 }, lowrider: { x: 0.38, z: -0.1, y: -0.05 },
+  sports: { x: 0.34, z: -0.05, y: -0.08 }, racer: { x: 0.0, z: -0.1, y: -0.12 },
+};
+export const driverSeat = (model) => DRIVER_SEAT[model] || { x: 0.36, z: -0.05, y: 0 };

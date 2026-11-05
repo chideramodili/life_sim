@@ -29,6 +29,7 @@ export const APPS = [
   { id: 'people', label: 'People', icon: '🧑‍🤝‍🧑', bg: 'linear-gradient(145deg,#ffb35c,#e07a1f)', click: 'peopleBtn', badge: 'peopleBadge' },
   { id: 'bills', label: 'Bills', icon: '🧾', bg: 'linear-gradient(145deg,#8be0a8,#2f9e63)', click: 'billsBtn', badge: 'billsBadge' },
   { id: 'staff', label: 'Staff', icon: '🧑‍💼', bg: 'linear-gradient(145deg,#8fb4ff,#4a6fd0)', click: 'staffBtn', isNew: true, force: true },
+  { id: 'props', label: 'Properties', icon: '🏘️', bg: 'linear-gradient(145deg,#ffcf6b,#e08a1f)', click: 'propsBtn', isNew: true, force: true },
   { id: 'skills', label: 'Skills', icon: '📈', bg: 'linear-gradient(145deg,#5fd6d0,#1f9aa0)', click: 'skillsBtn' },
   { id: 'look', label: 'Look', icon: '🎨', bg: 'linear-gradient(145deg,#c7a2ff,#7d4fe0)', click: 'lookBtn' },
   { id: 'story', label: 'Story', icon: '📖', bg: 'linear-gradient(145deg,#ffd36b,#d99a1c)', click: 'chip', force: true },
@@ -306,10 +307,12 @@ export function initHud(socket, look) {
     filterApps();
     paintPhone();
     wrap.hidden = false;
+    document.body.classList.add('phoneOpen');
   }
   function closePhone() {
     wallPicker.close();
     wrap.hidden = true;
+    document.body.classList.remove('phoneOpen');
   }
   closeBtn.addEventListener('click', closePhone);
   wrap.addEventListener('click', (e) => {

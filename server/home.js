@@ -102,6 +102,7 @@ export const GROUPS = {
     ['med_cabinet',  'Medicine cabinet',         32000,  { style: 4, max: 1, glb: 'medicine-cabinet', lift: 1.1 }],
     ['toilet',       'Toilet',                   45000,  { style: 3, max: 1, glb: 'toilet' }],
     ['bidet',        'Bidet',                    60000,  { style: 4, max: 1, glb: 'bidet' }],
+    ['toilet_gold',  'Gold-plated toilet',       420000, { style: 16, max: 1, glb: 'toilet' }],
     ['hot_tub',      'Wooden hot tub',           650000, { style: 24, max: 1, glb: 'hot-tub', size: [3, 3] }],
   ] },
   decor: { label: 'Decor and storage', size: [1, 1], cap: 12, items: [
@@ -201,7 +202,7 @@ export function parseHome(json) {
     seen.add(it.uid);
     maxUid = Math.max(maxUid, it.uid);
     const item = { uid: it.uid, id: it.id, placed: false, x: 0, z: 0, rot: 0, c: isInt(it.c) && it.c >= 0 && it.c < COLOR_CHOICES ? it.c : 0 };
-    if (it.placed === true && isInt(it.x) && isInt(it.z) && (it.rot === 0 || it.rot === 1)) {
+    if (it.placed === true && isInt(it.x) && isInt(it.z) && isInt(it.rot) && it.rot >= 0 && it.rot <= 3) {
       item.x = it.x; item.z = it.z; item.rot = it.rot; item.placed = true;
     }
     h.items.push(item);
@@ -216,11 +217,11 @@ export function parseHome(json) {
   return h;
 }
 
-export const footprint = (id, rot) => (rot ? [CATALOG[id].size[1], CATALOG[id].size[0]] : CATALOG[id].size);
+export const footprint = (id, rot) => (rot & 1 ? [CATALOG[id].size[1], CATALOG[id].size[0]] : CATALOG[id].size);   // rot 0-3 = quarter turns
 
 // Does this piece fit at (x, z) with this turn? Everything else already placed is checked. Returns { ok, why }.
 export function fits(home, item, x, z, rot) {
-  if (!isInt(x) || !isInt(z) || (rot !== 0 && rot !== 1)) return { ok: false, why: 'That spot is not valid.' };
+  if (!isInt(x) || !isInt(z) || !isInt(rot) || rot < 0 || rot > 3) return { ok: false, why: 'That spot is not valid.' };
   const [w, d] = footprint(item.id, rot);
   if (x < GMIN || z < GMIN || x + w - 1 > GMAX || z + d - 1 > GMAX) return { ok: false, why: 'That does not fit inside your home.' };
   // The front door is in the middle of the front wall: keep the way in clear.
@@ -298,7 +299,7 @@ export function sellItem(home, uid) {
 export function placeItem(home, req) {
   const it = find(home, req && req.uid);
   if (!it) return fail('You do not own that.');
-  const rot = req.rot === 1 ? 1 : req.rot === 0 || req.rot === undefined ? 0 : NaN;
+  const rot = isInt(req.rot) && req.rot >= 0 && req.rot <= 3 ? req.rot : req.rot === undefined ? 0 : NaN;
   if (req.auto === true) {
     const spot = autoSpot(home, it, it.placed ? it.rot : 0);
     if (!spot) return fail('There is no free space left.');
@@ -391,4 +392,35 @@ export function homeSolids(home) {
     out.push([o.x + 0.04, o.z + 0.04, o.x + w - 0.04, z1 - 0.04]);
   }
   return out;
+}
+
+// ---------- Seats, desks and the top-class fixtures ----------
+// A piece turned by rot faces this way (rot 0 faces the front door, then a quarter turn each).
+export const FACE = [[0, 1], [1, 0], [0, -1], [-1, 0]];
+export const faceAngle = (rot) => (rot * Math.PI) / 2;
+export const isWorkChair = (id) => id === 'office_chair' || id === 'gaming_chair';   // proper desk chairs, not sofas or poufs
+export const centerOf = (o) => { const [w, d] = footprint(o.id, o.rot); return { x: o.x + w / 2, z: o.z + d / 2 }; };
+const inBox = (o, cx, cz) => { const [w, d] = footprint(o.id, o.rot); return cx >= o.x && cx < o.x + w && cz >= o.z && cz < o.z + d; };
+// Only the highest-class pieces get the long animations: the king bed, the wooden hot tub, the gold-plated toilet.
+export const LUXURY = { bed: 'bed_king', tub: 'hot_tub', toilet: 'toilet_gold' };
+export const placedOf = (home, id) => (home && home.items ? home.items.find((o) => o.placed && o.id === id) : null) || null;
+
+// Working from home: is a desk chair already pulled up to a desk (the cell in front of it is part of a desk)?
+// If not, where could it go? Returns { kind: 'none' | 'ready' | 'move' | 'blocked', chair, x, z, rot }.
+export function workSetup(home) {
+  const desks = home.items.filter((o) => o.placed && CATALOG[o.id].group === 'desk');
+  const chairs = home.items.filter((o) => o.placed && isWorkChair(o.id));
+  if (!desks.length || !chairs.length) return { kind: 'none' };
+  for (const c of chairs) { const [fx, fz] = FACE[c.rot]; if (desks.some((d) => inBox(d, c.x + fx, c.z + fz))) return { kind: 'ready', chair: c }; }
+  let best = null;
+  for (const c of chairs) for (const d of desks) {
+    const [w, dd] = footprint(d.id, d.rot);
+    for (let ix = d.x; ix < d.x + w; ix++) for (let iz = d.z; iz < d.z + dd; iz++) for (let r = 0; r < 4; r++) {
+      const x = ix - FACE[r][0], z = iz - FACE[r][1];
+      if (inBox(d, x, z) || !fits(home, c, x, z, r).ok) continue;
+      const dist = Math.hypot(x - c.x, z - c.z);
+      if (!best || dist < best.dist) best = { chair: c, x, z, rot: r, dist };
+    }
+  }
+  return best ? { kind: 'move', chair: best.chair, x: best.x, z: best.z, rot: best.rot } : { kind: 'blocked', chair: chairs[0] };
 }

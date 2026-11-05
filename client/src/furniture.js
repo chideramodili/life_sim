@@ -294,7 +294,23 @@ export function createFurniture(scene) {
 
   let seatSpots = [];
   let tableBoxes = [];   // where a table or desk stands: you sit facing it, legs under it
+  // A piece that moved since the last update (the chair pulled up to the desk, or nudged with the arrows) glides there.
+  function glide(g, fx, fz, fry) {
+    const tx = g.position.x, tz = g.position.z, tr = g.rotation.y, t0 = performance.now();
+    const dur = Math.min(1300, 450 + Math.hypot(tx - fx, tz - fz) * 170);
+    const dr = ((tr - fry + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+    const step = (now) => {
+      const k = Math.min(1, (now - t0) / dur), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      g.position.x = fx + (tx - fx) * e; g.position.z = fz + (tz - fz) * e; g.rotation.y = fry + dr * e;
+      if (k < 1) requestAnimationFrame(step); else { g.position.x = tx; g.position.z = tz; g.rotation.y = tr; }
+      mark();
+    };
+    g.position.x = fx; g.position.z = fz; g.rotation.y = fry;
+    requestAnimationFrame(step);
+  }
   function rebuild() {
+    const prev = new Map();
+    for (const [uid, g] of meshes) prev.set(uid, { id: g.userData.id, x: g.position.x, z: g.position.z, ry: g.rotation.y });
     for (const g of meshes.values()) items.remove(g);
     meshes.clear();
     seatSpots = [];
@@ -311,14 +327,14 @@ export function createFurniture(scene) {
       const look = tint ? { ...def, color: tint } : def;
       // A piece with a real model uses it; until it has loaded (or if it cannot load) the simple box version stands in.
       const real = def.glb ? glbPiece(def) : null;
-      if (real) { if (tint) tintModel(real, tint); g.add(real); }
+      if (real) { const gold = it.id === 'toilet_gold' ? '#d9b44a' : null; if (tint || gold) tintModel(real, tint || gold); g.add(real); }
       else if (build) g.add(build(w, d, look));
       else g.add(standIn(w, d, look));
-      const fw = it.rot ? d : w;
-      const fd = it.rot ? w : d;
+      const fw = it.rot & 1 ? d : w;
+      const fd = it.rot & 1 ? w : d;
       g.position.set(it.x + fw / 2, 0, it.z + fd / 2);
-      if (it.rot) g.rotation.y = Math.PI / 2;
-      g.userData = { fw, fd };
+      g.rotation.y = (it.rot || 0) * Math.PI / 2;
+      g.userData = { fw, fd, id: it.id };
       // Touch the wall: a piece on the edge of the room slides until it is flush against that wall (curtains, wardrobes, beds...).
       if (!def.flat) {
         g.updateMatrixWorld(true);
@@ -329,10 +345,12 @@ export function createFurniture(scene) {
         if (it.z <= -10 && ok(bb.min.z + 10)) g.position.z -= bb.min.z + 10;
         else if (it.z + fd >= 10 && ok(10 - bb.max.z)) g.position.z += 10 - bb.max.z;
       }
-      if (def.group === 'seat' || def.group === 'sofa') { const n = Math.max(1, Math.round(Math.max(fw, fd) / (def.group === 'sofa' ? 0.9 : 1.6))); for (let k = 0; k < n; k++) { const o = (k - (n - 1) / 2) * 0.9; seatSpots.push(fw >= fd ? { x: g.position.x + o, z: g.position.z } : { x: g.position.x, z: g.position.z + o }); } }
+      if (def.group === 'seat' || def.group === 'sofa') { const n = Math.max(1, Math.round(Math.max(fw, fd) / (def.group === 'sofa' ? 0.9 : 1.6))); for (let k = 0; k < n; k++) { const o = (k - (n - 1) / 2) * 0.9; seatSpots.push(fw >= fd ? { x: g.position.x + o, z: g.position.z, f: (it.rot || 0) * Math.PI / 2 } : { x: g.position.x, z: g.position.z + o, f: (it.rot || 0) * Math.PI / 2 }); } }
       if (def.group === 'desk' || def.id === 'patio_set') tableBoxes.push({ x: g.position.x, z: g.position.z, hw: fw / 2, hd: fd / 2 });
       items.add(g);
       meshes.set(it.uid, g);
+      const pv = prev.get(it.uid);
+      if (pv && pv.id === it.id && (Math.hypot(pv.x - g.position.x, pv.z - g.position.z) > 0.05 || Math.abs(pv.ry - g.rotation.y) > 0.05)) glide(g, pv.x, pv.z, pv.ry);
     }
     mark();
   }

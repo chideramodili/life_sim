@@ -421,7 +421,7 @@ function animateOld(group, dt, speed, heading, working, t, sitting = false, exer
   if (exercise && !sitting) {
     for (const a of Object.values(M.actions)) a.setEffectiveWeight(0);
     M.mixer.update(dt);
-    if (exercise === 9) M.root.rotation.y += (0 - M.root.rotation.y) * Math.min(1, dt * 10);   // lie along the bed
+    if (exercise === 9 || exercise === 10) { const to = group.userData.sitFace != null ? group.userData.sitFace : 0; M.root.rotation.y += (((to - M.root.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * Math.min(1, dt * 10); }   // lie along the bed
     const tl = exerciseTilt(exercise, t);
     M.root.rotation.x += (tl.x - M.root.rotation.x) * Math.min(1, dt * 8);
     M.root.position.y += (tl.y - M.root.position.y) * Math.min(1, dt * 8);
@@ -461,6 +461,22 @@ function animateOld(group, dt, speed, heading, working, t, sitting = false, exer
       turn(M.rig, 'Head', -0.2, 0, 0, 1);
       return;
     }
+    if (sitting === 'car') {
+      // Driving your own car: sit in the driver's seat, face the way the car goes, hands on the wheel.
+      const seat = group.userData.seat || { x: 0.36, z: -0.05, y: 0 };
+      const ry = heading;
+      const d = ((ry - M.root.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      M.root.rotation.y += d * Math.min(1, dt * 12);
+      const tx = Math.cos(ry) * seat.x + Math.sin(ry) * seat.z, tz = -Math.sin(ry) * seat.x + Math.cos(ry) * seat.z;
+      M.root.position.x += (tx - M.root.position.x) * Math.min(1, dt * 10);
+      M.root.position.z += (tz - M.root.position.z) * Math.min(1, dt * 10);
+      M.root.position.y += (seat.y - M.root.position.y) * Math.min(1, dt * 10);
+      poseSit(M.rig, group, 0.45, 0.1);
+      if (M.fwd === undefined) M.fwd = fitForward(M.root, M.rig);
+      if (M.fwd) for (const side of ['Left', 'Right']) { turn(M.rig, side + 'Arm', ...M.fwd[side].a, 1); turn(M.rig, side + 'ForeArm', ...M.fwd[side].f, 1); }
+      turn(M.rig, 'Head', 0, 0, 0, 1);
+      return;
+    }
     const sd = group.userData.sitDesk;
     if (sd) {
       // At a table: turn to face it, slide in so the legs go under it, both hands out on a laptop and typing.
@@ -474,9 +490,10 @@ function animateOld(group, dt, speed, heading, working, t, sitting = false, exer
         const k = side === 'Left' ? 0 : 1.7;
         turn(M.rig, side + 'Arm', ...M.fwd[side].a, 1);
         const f = M.fwd[side].f;
-        turn(M.rig, side + 'ForeArm', f[0] + Math.sin(t * 13 + k) * 0.06, f[1], f[2], 1);   // fingers tapping
+        turn(M.rig, side + 'ForeArm', f[0] + (sd.typing ? Math.sin(t * 13 + k) * 0.06 : 0), f[1], f[2], 1);   // fingers tapping (only while working)
       }
       turn(M.rig, 'Head', 0.25, 0, 0, 1);
+      if (!sd.typing) { if (group.userData.laptop) group.userData.laptop.visible = false; return; }   // only working from home gets the laptop
       if (!group.userData.laptop) {
         const lp = new THREE.Group();
         const base = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.02, 0.24), mat('#b8bcc4')); base.position.y = 0;
@@ -492,6 +509,7 @@ function animateOld(group, dt, speed, heading, working, t, sitting = false, exer
       return;
     }
     if (group.userData.laptop) group.userData.laptop.visible = false;
+    if (group.userData.sitFace != null) { const dd = ((group.userData.sitFace - M.root.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI; M.root.rotation.y += dd * Math.min(1, dt * 8); }   // sit facing the way the chair faces
     poseSit(M.rig, group, 0.45, 0);
     return;
   }

@@ -474,7 +474,18 @@ export function initRadio() {
       const vw = window.innerWidth, cashL = cashEl.getBoundingClientRect().left;
       const leftR = leftEl && leftEl.offsetWidth ? leftEl.getBoundingClientRect().right : 12;
       const l = Math.max(12, leftR + 8), w = Math.max(90, Math.min(260, cashL - 10 - l - 14));   // 14 = the island's own padding
-      if (cashL > 0 && cashL < vw && w >= 90) { isl.style.setProperty('--isl-l', l + 'px'); isl.style.setProperty('--isl-tx', '0px'); isl.style.setProperty('--isl-w', w + 'px'); }
+      // Centred on the screen when it fits between the date circle and the cash pill; otherwise next to the circle.
+      const half = Math.min(vw / 2 - l, cashL - 10 - vw / 2), wc = Math.min(260, 2 * half - 14);
+      if (cashL > 0 && cashL < vw && wc >= 110) { isl.style.setProperty('--isl-l', '50%'); isl.style.setProperty('--isl-tx', '-50%'); isl.style.setProperty('--isl-w', wc + 'px'); }
+      else if (cashL > 0 && cashL < vw && w >= 90) { isl.style.setProperty('--isl-l', l + 'px'); isl.style.setProperty('--isl-tx', '0px'); isl.style.setProperty('--isl-w', w + 'px'); }
+    };
+    // While the phone is open the music lives in the phone's own island (its notch); the screen island steps aside.
+    const phoneIsland = (name) => {
+      const n = document.getElementById('phoneNotch'); if (!n) return;
+      if (!n.dataset.np) { n.dataset.np = '1'; n.innerHTML = '<i class="npDisc"></i><span class="npName"><span></span></span><span class="npBars"><i></i><i></i><i></i></span>'; }
+      const sp = n.querySelector('.npName span');
+      if (sp.textContent !== name) sp.textContent = name || '';
+      n.classList.toggle('music', !!name);
     };
     const setBig = (on) => { isl.classList.toggle('grown', on); clearTimeout(bigT); if (on) bigT = setTimeout(() => isl.classList.remove('grown'), 12000); };
     const sync = () => {
@@ -488,6 +499,7 @@ export function initRadio() {
       isl.classList.toggle('ext', !!(current && current.ext));
       isl.classList.toggle('sp', !!(current && current.ext === 'sp'));
       placeIsland();
+      phoneIsland(name);
       if (name === shown) return;
       shown = name;
       isl.classList.toggle('on', !!name);

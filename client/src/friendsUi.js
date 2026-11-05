@@ -92,7 +92,7 @@ export function initFriends(socket) {
   }
 
   function openChat(name) {
-    chatWith = name; $('moneySec').hidden = true;
+    chatWith = name; setMoneyMode(false);
     messages = [];
     paintChat();
     socket.emit('dmOpen', { with: name });
@@ -130,7 +130,32 @@ export function initFriends(socket) {
   };
   $('friendAddBtn').addEventListener('click', submitAdd);
   $('friendInput').addEventListener('keydown', (e) => e.key === 'Enter' && submitAdd());
+  // The 💸 inside the message box turns the box into the amount box (and back), so no extra panel opens.
+  let moneyMode = false;
+  function setMoneyMode(on) {
+    moneyMode = on;
+    const inp = $('dmInput');
+    inp.value = '';
+    inp.type = on ? 'number' : 'text';
+    inp.inputMode = on ? 'numeric' : 'text';
+    inp.placeholder = on ? 'Amount in ₦' : 'Message';
+    inp.removeAttribute('maxlength'); if (!on) inp.maxLength = 120;
+    $('dmMoneyTog').classList.toggle('on', on);
+    inp.parentElement.classList.toggle('money', on);
+    $('moneyLimit').hidden = !on;
+    $('dmSendBtn').textContent = on ? 'Send ₦' : 'Send';
+    $('dmPhoneBtn').hidden = on;
+    if (on) inp.focus();
+  }
   $('dmSendBtn').addEventListener('click', () => {
+    if (moneyMode) {
+      const amount = Math.floor(Number($('dmInput').value));
+      if (!chatWith || !Number.isFinite(amount) || amount <= 0) return;
+      if (!confirm(`Send ₦${fmt(amount)} to ${chatWith}? You cannot take it back.`)) return;
+      socket.emit('sendMoney', { to: chatWith, amount });
+      setMoneyMode(false);
+      return;
+    }
     const t = $('dmInput').value.trim();
     if (!t || !chatWith) return;
     socket.emit('dmSend', { to: chatWith, text: t });
@@ -138,14 +163,7 @@ export function initFriends(socket) {
   });
   $('dmInput').addEventListener('keydown', (e) => e.key === 'Enter' && $('dmSendBtn').click());
   $('dmPhoneBtn').addEventListener('click', () => chatWith && socket.emit('sharePhone', { to: chatWith }));
-  $('dmMoneyTog').addEventListener('click', () => { const sec = $('moneySec'); sec.hidden = !sec.hidden; if (!sec.hidden) { $('moneyInput').focus(); sec.scrollIntoView({ block: 'nearest' }); } });
-  $('moneyBtn').addEventListener('click', () => {
-    const amount = Math.floor(Number($('moneyInput').value));
-    if (!chatWith || !Number.isFinite(amount) || amount <= 0) return;
-    if (!confirm(`Send ₦${fmt(amount)} to ${chatWith}? You cannot take it back.`)) return;
-    socket.emit('sendMoney', { to: chatWith, amount });
-    $('moneyInput').value = ''; $('moneySec').hidden = true;
-  });
+  $('dmMoneyTog').addEventListener('click', () => setMoneyMode(!moneyMode));
   $('dmRemoveBtn').addEventListener('click', () => {
     if (chatWith && confirm(`Remove ${chatWith} from your friends?`)) socket.emit('friendRemove', { name: chatWith });
   });

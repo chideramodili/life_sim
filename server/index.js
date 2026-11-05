@@ -22,7 +22,8 @@ import { planFor, stepWork } from './workstyle.js';
 import { restoreBackup, startBackups, finalBackup } from './backup.js';
 import { speedFor, slide, findPath, roomBlockedFn, roomSolids } from './movement.js';
 import { MOVE_FEE, CITIES, CITY_IDS, DEFAULT_CITY, isCity, parseCity, TICKETS, TICKET_IDS, ticketQuote, distanceBetween, HIGHWAY, neighbour, gateAt, arrivalFrom, placeName } from './cities.js';
-import { MAX_LOTS, SELL_LAND, BIZ_MAX_LEVEL, UPGRADE_COST, STOCK_CAP, KINDS, KIND_IDS, isKind, priceOf, validName, isOpen as bizOpenNow, newBiz, step as bizStep, buyStock, payStaff, hire as bizHire, STAFF_WAGE, STAFF_MAX, STAFF_BOOST, HIRE_FEE } from './business.js';
+import { landMult, lotPrice, SELL_TO_GAME, BUILDING_BACK, MARKET_FEE, isAsk, marketNet } from './land.js';
+import { MAX_LOTS, SELL_LAND, BIZ_MAX_LEVEL, isAuto, autoStep as bizAutoStep, buildingValue, UPGRADE_COST, STOCK_CAP, KINDS, KIND_IDS, isKind, priceOf, validName, isOpen as bizOpenNow, newBiz, step as bizStep, buyStock, payStaff, hire as bizHire, STAFF_WAGE, STAFF_MAX, STAFF_BOOST, HIRE_FEE } from './business.js';
 import { LAPTOPS, LAPTOP_IDS, parseLaptop, laptopTier, buyLaptop, laptopWhy } from './laptops.js';
 import { PHONES, PHONE_IDS, parsePhones, serializePhones, buyPhone, usePhone, hasCamera } from './phones.js';
 import { newChess, chessMove, chessStatus, legalMoves, newTwentyOne, twentyOneAct, handValue, newWordRace, wordGuess, GAME_KINDS, WORD_ROUNDS } from './games.js';
@@ -51,7 +52,7 @@ import {
   CLOTHES, parseWardrobe, wardrobeInfo, fashionCatalog, publicLook, charmBonus, compliment, COMPLIMENT_COOLDOWN_MS, outfitOf, scentOf,
   buyClothes, sellClothes, wear, takeOff, buyPerfume, sellPerfume, spritz, tickScent,
 } from './fashion.js';
-import { homeSolids, parseHome, homeInfo, effectsOf, buyItem, recolorItem, sellItem, placeItem, putAway, paint, setLights } from './home.js';
+import { workSetup, centerOf, faceAngle, placedOf, LUXURY, homeSolids, parseHome, homeInfo, effectsOf, buyItem, recolorItem, sellItem, placeItem, putAway, paint, setLights } from './home.js';
 
 // ---------- Settings ----------
 const PORT = process.env.PORT || 8080;
@@ -368,7 +369,7 @@ db.exec(`
 
 // Upgrade older databases in place: add the new columns if they are missing.
 const existingColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
-for (const [n, d] of [['staff', 'INTEGER NOT NULL DEFAULT 0'], ['owed', 'REAL NOT NULL DEFAULT 0']]) {
+for (const [n, d] of [['staff', 'INTEGER NOT NULL DEFAULT 0'], ['owed', 'REAL NOT NULL DEFAULT 0'], ['ask', 'INTEGER NOT NULL DEFAULT 0']]) {
   if (!db.prepare('PRAGMA table_info(lots)').all().some((c) => c.name === n)) db.exec(`ALTER TABLE lots ADD COLUMN ${n} ${d}`);
 }
 const addColumn = (name, ddl) => {
@@ -426,7 +427,7 @@ db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
 // Every query uses placeholders (?), so user input can never change the query itself.
 const q = {
   lotsAll: db.prepare('SELECT l.*, u.username AS ownerName FROM lots l JOIN users u ON u.id = l.owner'),
-  lotSet: db.prepare('INSERT OR REPLACE INTO lots (city, lot, owner, kind, name, level, stock, till, frac, built, staff, owed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  lotSet: db.prepare('INSERT OR REPLACE INTO lots (city, lot, owner, kind, name, level, stock, till, frac, built, staff, owed, ask) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   lotDel: db.prepare('DELETE FROM lots WHERE city = ? AND lot = ?'),
   userByName: db.prepare('SELECT * FROM users WHERE username = ?'),
   userById: db.prepare('SELECT * FROM users WHERE id = ?'),
@@ -948,7 +949,8 @@ function snapshot(key) {
       const o = look ? { id: p.id, name: p.name, x: p.x, z: p.z, color: p.color, look } : { id: p.id, name: p.name, x: p.x, z: p.z, color: p.color };
       if (p.riding) { o.ride = p.riding; o.ry = p.ry || 0; if (p.drive) { const vm = VEHICLES[activeVehicle(p, p.drive.kind)]; if (vm && vm.model) o.rm = vm.model; } }
       if (p.shift) { o.work = p.shift.plan ? p.shift.plan.style : 1; if (p.shift.plan && p.shift.at) o.wf = Math.round(p.face * 100) / 100; }
-      if (p.sit) o.sit = 1;
+      if (p.sit) { o.sit = 1; if (p.sitF != null) o.sf = p.sitF; }
+      else if (p.anim && p.anim.k === 10 && p.sitF != null) o.sf = p.sitF;
       if (p.lying) o.lie = 1;
       if (p.anim && p.anim.until > Date.now()) o.an = p.anim.k;
       if (p.body === 'woman') o.b = 1;
@@ -1475,6 +1477,46 @@ function extraSolids(p) {
   return null;
 }
 const HOSPITAL_BEDS = [{ x: -8, z: -5.9 }, { x: -1, z: -5.9 }]; // the middle bed holds the ambient patient
+// Walk to a seat and sit (the chair is solid, so the walk goes AROUND the other furniture). f = the way the seat faces.
+// fx = one of the top-class fixtures (bed, tub, toilet): the long animation plays there instead of a plain sit.
+const FX_REACH = { bed: 2.1, tub: 2.7, toilet: 1.7 }, FX_MS = { bed: 5000, tub: 4500, toilet: 3500 };
+function goSit(p, x, z, f, fx = null) {
+  p.sitTo = { x, z, f: Number.isFinite(f) ? Math.round((((f % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) * 100) / 100 : null, fx, reach: fx ? FX_REACH[fx] : 1.5, until: Date.now() + 12000 };
+  p.tx = x; p.tz = z; p.run = false; p.path = null;
+  const b = boundsOf(p.room); p.tx = clamp(p.tx, -b.bx, b.bx); p.tz = clamp(p.tz, -b.bz, b.bz);
+  if (Math.hypot(p.tx - p.x, p.tz - p.z) > 1.2) {
+    const street = p.room === 'street';
+    const blocked = street ? (px, pz) => ctxOf(p).walls.blocked(px, pz) : roomBlockedFn(p.room, extraSolids(p));
+    const path = findPath(blocked, { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, street ? { bx: b.bx, bz: b.bz, cell: 1 } : { bx: b.bx, bz: b.bz, cell: 0.5 });
+    if (path && path.length) { p.path = path; p.pathKey = `${p.tx},${p.tz}`; }
+  }
+}
+// The top-class pieces (king bed, hot tub, gold toilet) get a short animation when you sleep, shower or go.
+function startFixture(p, kind) {
+  const it = p.room === HOME ? placedOf(p.home, LUXURY[kind]) : null;
+  if (!it || p.shift || p.trip || p.lying || p.fxEnd || p.wfh) return;
+  const c = centerOf(it);
+  p.sit = false; p.anim = null; p.auto = null;
+  // lying on the bed: head to the headboard side (the bed's head is its west end when it is not turned)
+  goSit(p, c.x, c.z, faceAngle(it.rot) + (kind === 'bed' ? Math.PI / 2 : 0), kind);
+}
+// Arrived at a fixture: lie down on the bed, or sit in the tub or on the toilet, for a few seconds.
+function fixtureOn(p, st, from, now) {
+  const ms = FX_MS[st.fx];
+  p.fxEnd = { at: now + ms, out: { x: from.x, z: from.z } };
+  p.frozenUntil = now + ms + 300;
+  if (st.fx === 'bed') p.anim = { k: 10, until: now + ms };
+  else p.sit = true;
+}
+// A work shift at home starts once you are sitting at the desk, not before.
+function beginShift(p, slot, job) {
+  const now = Date.now();
+  const ms = Math.round(shiftMs(job, perkOf(job, p.skills).level) * SHIFT_SCALE);
+  p.shift = { slot, jobId: job.id, room: job.room, start: now, end: now + ms, plan: planFor(job.id), i: 0, at: 0 };
+  p.tx = p.x; p.tz = p.z; // stand still (a job with a work routine walks to its first stop on the next tick)
+  if (ms <= 0) return finishShift(p);
+  notice(p, `Shift started: ${job.title}. About ${Math.ceil(ms / 1000)} seconds. You cannot leave until it is done.`);
+}
 function getUp(p) {
   if (!p.lying) return;
   p.lying = false; p.bedAt = null; p.anim = null;
@@ -1489,6 +1531,7 @@ function moveNow(p, roomId, x = roomId === 'street' ? CITY.spawn.x : 0, z = room
   if (roomId === HOME) p.city = p.homeCity; // your home is in the city you live in
   if (p.city !== prevCity) { p.friendsSig = ''; sendFriends(p, true); } // friends' houses differ in each city
   p.trip = null;
+  p.fxEnd = null; p.wfh = null; p.sitTo = null; p.frozenUntil = 0;
   if (p.lying) { p.lying = false; p.bedAt = null; p.anim = null; }
   p.x = p.tx = x;
   p.z = p.tz = z;
@@ -1666,17 +1709,28 @@ const LOTS = {};
 for (const id of CITY_IDS) LOTS[id] = new Map();
 for (const r of q.lotsAll.all()) {
   if (!LOTS[r.city]) continue;
-  LOTS[r.city].set(r.lot, { owner: r.owner, ownerName: r.ownerName, biz: r.kind && isKind(r.kind) ? { kind: r.kind, name: r.name || KINDS[r.kind].label, level: r.level, stock: r.stock, till: r.till, frac: r.frac, built: r.built, staff: r.staff || 0, owed: r.owed || 0 } : null });
+  LOTS[r.city].set(r.lot, { owner: r.owner, ownerName: r.ownerName, ask: r.ask || 0, biz: r.kind && isKind(r.kind) ? { kind: r.kind, name: r.name || KINDS[r.kind].label, level: r.level, stock: r.stock, till: r.till, frac: r.frac, built: r.built, staff: r.staff || 0, owed: r.owed || 0 } : null });
 }
 let lotsDirty = false;
 const saveLot = (city, id) => {
   const rec = LOTS[city].get(id);
   if (!rec) q.lotDel.run(city, id);
-  else { const b = rec.biz; q.lotSet.run(city, id, rec.owner, b ? b.kind : null, b ? b.name : null, b ? b.level : 1, b ? b.stock : 0, b ? Math.round(b.till) : 0, b ? b.frac : 0, b ? b.built : 0, b ? b.staff || 0 : 0, b ? b.owed || 0 : 0); }
+  else { const b = rec.biz; q.lotSet.run(city, id, rec.owner, b ? b.kind : null, b ? b.name : null, b ? b.level : 1, b ? b.stock : 0, b ? Math.round(b.till) : 0, b ? b.frac : 0, b ? b.built : 0, b ? b.staff || 0 : 0, b ? b.owed || 0 : 0, rec.ask || 0); }
+};
+// What a lot costs today: its starting price times how scarce land is in that city and how long land has been gaining value.
+// extra = -1 asks "what would it be after one more lot is back on the market".
+const cityLotCount = (city) => CITY_CTX[city].layout.lots.length;
+const landNow = (city, l, extra = 0) => lotPrice(l.price, landMult(Math.max(0, LOTS[city].size + extra), cityLotCount(city)));
+const sellToGame = (city, l, rec) => Math.round(landNow(city, l, -1) * SELL_TO_GAME) + (rec.biz ? Math.round(buildingValue(rec.biz) * BUILDING_BACK) : 0);
+const lotWorth = (city, l, rec) => landNow(city, l, 0) + (rec.biz ? buildingValue(rec.biz) : 0);
+// Money for somebody who may be offline.
+const payUser = (userId, amount, text) => {
+  const o = [...players.values()].find((x) => x.userId === userId);
+  if (o) { o.cash += amount; if (text) notice(o, text); } else q.creditCash.run(amount, userId);
 };
 const lotViews = (city) => CITY_CTX[city].layout.lots.map((l) => {
   const rec = LOTS[city].get(l.id);
-  return { id: l.id, owner: rec ? rec.ownerName : null, kind: rec && rec.biz ? rec.biz.kind : null, name: rec && rec.biz ? rec.biz.name : null, level: rec && rec.biz ? rec.biz.level : 0, soldOut: Boolean(rec && rec.biz && rec.biz.stock <= 0) };
+  return { id: l.id, owner: rec ? rec.ownerName : null, kind: rec && rec.biz ? rec.biz.kind : null, name: rec && rec.biz ? rec.biz.name : null, level: rec && rec.biz ? rec.biz.level : 0, soldOut: Boolean(rec && rec.biz && rec.biz.stock <= 0), ask: rec && rec.ask ? rec.ask : 0, price: rec ? 0 : landNow(city, l) };
 });
 const sendLots = (p) => p.socket.emit('lots', { city: p.city, list: lotViews(p.city) });
 const broadcastLots = (city) => { const key = spaceKey('street', 0, city); if (io.sockets.adapter.rooms.has(key)) io.to(key).emit('lots', { city, list: lotViews(city) }); };
@@ -1694,12 +1748,12 @@ function bizInfo(p, id) {
   if (!l) return null;
   const rec = LOTS[p.city].get(id);
   const mine = Boolean(rec && rec.owner === p.userId);
-  const info = { id, price: l.price, sell: Math.round(l.price * SELL_LAND), owner: rec ? rec.ownerName : null, mine, owned: LOTS_OWNED(p), max: MAX_LOTS, kinds: [] };
+  const info = { id, price: landNow(p.city, l), sell: rec && mine ? sellToGame(p.city, l, rec) : 0, ask: rec && mine ? rec.ask || 0 : 0, value: rec && mine ? lotWorth(p.city, l, rec) : 0, owner: rec ? rec.ownerName : null, mine, owned: LOTS_OWNED(p), max: MAX_LOTS, kinds: [] };
   if (mine && !rec.biz) info.kinds = KIND_IDS.map((k) => ({ id: k, label: KINDS[k].label, build: KINDS[k].build, item: KINDS[k].item, price: KINDS[k].price }));
   if (rec && rec.biz) {
     const b = rec.biz;
     info.biz = { kind: b.kind, label: KINDS[b.kind].label, name: b.name, level: b.level, item: KINDS[b.kind].item, price: priceOf(b.kind, b.level), open: bizOpenNow(b.kind, minuteOfDay()), hours: KINDS[b.kind].hours, soldOut: b.stock <= 0, staff: b.staff || 0 };
-    if (mine) Object.assign(info.biz, { stock: b.stock, cap: STOCK_CAP(b.level), till: Math.round(b.till), cost: KINDS[b.kind].cost, upgrade: b.level < BIZ_MAX_LEVEL ? UPGRADE_COST[b.level + 1] : null, staffMax: STAFF_MAX(b.level), wage: STAFF_WAGE, hireFee: HIRE_FEE, boost: Math.round(STAFF_BOOST * 100), owed: Math.round(b.owed || 0) });
+    if (mine) Object.assign(info.biz, { stock: b.stock, cap: STOCK_CAP(b.level), till: Math.round(b.till), cost: KINDS[b.kind].cost, upgrade: b.level < BIZ_MAX_LEVEL ? UPGRADE_COST[b.level + 1] : null, maxLevel: BIZ_MAX_LEVEL, staffMax: STAFF_MAX(b.level), wage: STAFF_WAGE, hireFee: HIRE_FEE, boost: Math.round(STAFF_BOOST * 100), owed: Math.round(b.owed || 0), auto: isAuto(b) });
   }
   return info;
 }
@@ -1723,6 +1777,15 @@ setInterval(() => {
       if (rec.biz.staff) {
         lotsDirty = true;
         if (payStaff(rec.biz, dt, open)) { const ow = [...players.values()].find((o) => o.userId === rec.owner); if (ow) notice(ow, `${rec.biz.name} could not pay its wages and a staff member quit.`); }
+      }
+      if (isAuto(rec.biz)) {
+        const r = bizAutoStep(rec.biz);
+        if (r.bought) { lotsDirty = true; changed = true; }
+        // Send the profit to the owner, at most once a minute so the notices do not pile up.
+        if (r.send && now - (rec.biz.lastSend || 0) > 60000) {
+          rec.biz.lastSend = now; rec.biz.till -= r.send; lotsDirty = true;
+          payUser(rec.owner, r.send, `You earned ₦${r.send.toLocaleString('en-US')} from ${rec.biz.name}.`);
+        }
       }
       if (sold > 0) { lotsDirty = true; if (rec.biz.stock <= 0) changed = true; }
     }
@@ -2174,25 +2237,17 @@ io.on('connection', (socket) => {
   // Sit down where you stand (or stand up again). Walking anywhere stands you up.
   // The browser says which chair it found nearby ({ x, z }); the player walks to it and then sits. Without a chair it just stands up.
   socket.on('sit', (seat) => {
+    if (p.fxEnd) return;
     if (p.sit) { p.sit = false; p.sitTo = null; return; }
     if (p.trip || p.drive || p.shift || p.riding || jailLeft(p) || !p.room) return notice(p, 'You cannot sit down right now.');
     if (!seat || !Number.isFinite(seat.x) || !Number.isFinite(seat.z) || Math.hypot(seat.x - p.x, seat.z - p.z) > 9) return notice(p, 'There is no chair nearby to sit on.');
-    p.sitTo = { x: seat.x, z: seat.z, until: Date.now() + 12000 };
-    p.tx = seat.x; p.tz = seat.z; p.run = false; p.path = null;
-    const b = boundsOf(p.room); p.tx = clamp(p.tx, -b.bx, b.bx); p.tz = clamp(p.tz, -b.bz, b.bz);
-    // Walk AROUND tables, beds and other furniture to the chair (like a tap does), instead of straight at it.
-    if (Math.hypot(p.tx - p.x, p.tz - p.z) > 1.2) {
-      const street = p.room === 'street';
-      const blocked = street ? (x, z) => ctxOf(p).walls.blocked(x, z) : roomBlockedFn(p.room, extraSolids(p));
-      const path = findPath(blocked, { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, street ? { bx: b.bx, bz: b.bz, cell: 1 } : { bx: b.bx, bz: b.bz, cell: 0.5 });
-      if (path && path.length) { p.path = path; p.pathKey = `${p.tx},${p.tz}`; }
-    }
+    goSit(p, seat.x, seat.z, seat.f);
   });
   socket.on('moveTo', (t) => {
     if (p.trip || p.drive) return;
     if (p.frozenUntil && Date.now() < p.frozenUntil) return; // still in the hospital bed
     if (p.lying) getUp(p);
-    p.sitTo = null;
+    p.sitTo = null; p.wfh = null;
     if (p.sit && t && Number.isFinite(t.x) && Number.isFinite(t.z) && Math.hypot(t.x - p.x, t.z - p.z) > 0.3) p.sit = false;
     const now = Date.now();
     if (now - p.lastMove < 50) return; // ignore floods
@@ -2256,6 +2311,7 @@ io.on('connection', (socket) => {
     const calm = (type === 'sleep' && p.room === HOME && power) || type === 'hotelsleep' ? STRESS.sleepHome : STRESS.actions[type];
     if (calm !== undefined) p.stress = clampStress(p.stress + calm);
     notice(p, `${a.label}: ${NEED_LABELS[a.need]} +${gain}.${extra}`);
+    if (p.room === HOME && (type === 'sleep' || type === 'shower' || type === 'toilet')) startFixture(p, type === 'sleep' ? 'bed' : type === 'shower' ? 'tub' : 'toilet');
     if (type === 'dance') questEvent(p, 'dance');
     if (type === 'event') {
       p.social = Math.min(100, p.social + 15);
@@ -2353,6 +2409,7 @@ io.on('connection', (socket) => {
   // req.slot ('main' or 'part') says which job; when it is left out we pick the job whose workplace you are standing in.
   socket.on('work', (req) => {
     if (p.shift) return notice(p, 'You are already on a shift.');
+    if (p.wfh) return notice(p, 'Heading to your desk.');
     if (p.trip) return notice(p, 'Wait until you arrive.');
     let slot = req && typeof req === 'object' && (req.slot === 'part' || req.slot === 'main' || req.slot === 'extra') ? req.slot : null;
     if (!slot) {
@@ -2378,11 +2435,21 @@ io.on('connection', (socket) => {
       if (cons.noPower) return notice(p, 'No power at home, so you cannot work. Pay your electricity.');
       if (cons.noData) return notice(p, 'You are out of data, so you cannot work online. Renew it in Bills.');
     }
-    const ms = Math.round(shiftMs(job, perkOf(job, p.skills).level) * SHIFT_SCALE);
-    p.shift = { slot, jobId: job.id, room: job.room, start: now, end: now + ms, plan: planFor(job.id), i: 0, at: 0 };
-    p.tx = p.x; p.tz = p.z; // stand still (a job with a work routine walks to its first stop on the next tick)
-    if (ms <= 0) return finishShift(p);
-    notice(p, `Shift started: ${job.title}. About ${Math.ceil(ms / 1000)} seconds. You cannot leave until it is done.`);
+    // Working from home with a desk and a desk chair: the chair is pulled up to the desk (if it can be), you walk to it, sit,
+    // and the shift starts when you are seated. Without a desk and chair you work standing up, as before.
+    if (job.remote && p.room === HOME) {
+      const ws = workSetup(p.home);
+      if (ws.kind === 'blocked') return notice(p, 'Something is blocking your desk chair. Move the chair to your desk yourself, then start the shift.');
+      if (ws.kind === 'ready' || ws.kind === 'move') {
+        const chair = ws.chair;
+        if (ws.kind === 'move') { chair.x = ws.x; chair.z = ws.z; chair.rot = ws.rot; sendHome(p, true); notice(p, 'You pull your chair up to the desk.'); }
+        const c = centerOf(chair);
+        p.sit = false; p.anim = null;
+        p.wfh = { slot };
+        return goSit(p, c.x, c.z, faceAngle(chair.rot));
+      }
+    }
+    beginShift(p, slot, job);
   });
   socket.on('cancelShift', () => {
     if (p.shift) cancelShift(p, 'You left your shift early. No pay.');
@@ -2553,11 +2620,12 @@ io.on('connection', (socket) => {
     if (!l) return;
     if (LOTS[p.city].has(id)) return notice(p, 'That lot is already sold.');
     if (LOTS_OWNED(p) >= MAX_LOTS) return notice(p, `You can own at most ${MAX_LOTS} lots.`);
-    if (p.cash < l.price) return notice(p, `That lot costs ₦${l.price.toLocaleString('en-US')}.`);
-    p.cash -= l.price;
+    const cost = landNow(p.city, l);
+    if (p.cash < cost) return notice(p, `That lot costs ₦${cost.toLocaleString('en-US')}.`);
+    p.cash -= cost;
     LOTS[p.city].set(id, { owner: p.userId, ownerName: p.name, biz: null });
     saveLot(p.city, id);
-    notice(p, `You bought the lot for ₦${l.price.toLocaleString('en-US')}. Now build something on it.`);
+    notice(p, `You bought the lot for ₦${cost.toLocaleString('en-US')}. Now build something on it.`);
     broadcastLots(p.city);
     sendBiz(p, id);
   });
@@ -2566,7 +2634,7 @@ io.on('connection', (socket) => {
     if (!l) return;
     const rec = LOTS[p.city].get(id);
     if (!rec || rec.owner !== p.userId) return notice(p, 'That is not your lot.');
-    const back = Math.round(l.price * SELL_LAND) + (rec.biz ? Math.round(rec.biz.till) : 0);
+    const back = sellToGame(p.city, l, rec) + (rec.biz ? Math.round(rec.biz.till) : 0);
     p.cash += back;
     LOTS[p.city].delete(id);
     saveLot(p.city, id);
@@ -2655,7 +2723,7 @@ io.on('connection', (socket) => {
     p.cash -= cost;
     rec.biz.level += 1;
     saveLot(p.city, id);
-    notice(p, `${rec.biz.name} is now level ${rec.biz.level}.`);
+    notice(p, rec.biz.level >= 4 ? `${rec.biz.name} is now automated. It restocks itself and sends you its profit.` : `${rec.biz.name} is now level ${rec.biz.level}.`);
     broadcastLots(p.city);
     sendBiz(p, id);
   });
@@ -2682,6 +2750,83 @@ io.on('connection', (socket) => {
     notice(p, `You bought a ${KINDS[b.kind].item.toLowerCase()} at ${b.name} for ₦${price.toLocaleString('en-US')}.`);
     if (b.stock <= 0) broadcastLots(p.city);
     sendBiz(p, id);
+  });
+
+  // ----- Properties app, and the player land market -----
+  const propsOf = () => {
+    const out = [];
+    for (const c of CITY_IDS) for (const [id, rec] of LOTS[c]) {
+      if (rec.owner !== p.userId) continue;
+      const l = CITY_CTX[c].layout.lots[id];
+      out.push({ city: c, cityName: CITIES[c].name, id, kind: rec.biz ? rec.biz.kind : null, name: rec.biz ? rec.biz.name : null, level: rec.biz ? rec.biz.level : 0, auto: Boolean(rec.biz && isAuto(rec.biz)), till: rec.biz ? Math.round(rec.biz.till) : 0, value: lotWorth(c, l, rec), ask: rec.ask || 0, here: c === p.city });
+    }
+    return out;
+  };
+  const sendProps = () => socket.emit('properties', { list: propsOf() });
+  socket.on('propsOpen', sendProps);
+  socket.on('propGo', (req) => {
+    if (!req || typeof req !== 'object' || !CITY_CTX[req.city]) return;
+    const rec = LOTS[req.city].get(req.id);
+    if (!rec || rec.owner !== p.userId) return notice(p, 'That is not your property.');
+    if (p.trip || p.drive || jailLeft(p) || p.shift) return notice(p, 'Not right now.');
+    if (req.city !== p.city) return notice(p, `That property is in ${CITIES[req.city].name}. Travel there first.`);
+    const l = CITY_CTX[req.city].layout.lots[req.id];
+    if (p.frozenUntil && Date.now() < p.frozenUntil) return;
+    if (p.room !== 'street') moveNow(p, 'street', l.door.x, l.door.z + 1.5);
+    else {
+      if (p.lying) getUp(p);
+      p.sitTo = null; p.sit = false; p.auto = null;
+      p.tx = l.door.x; p.tz = l.door.z + 1.5; p.run = false; p.path = null;
+      const b = boundsOf('street');
+      const path = findPath((x, z) => ctxOf(p).walls.blocked(x, z), { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, { bx: b.bx, bz: b.bz, cell: 1 });
+      if (path && path.length) { p.path = path; p.pathKey = `${p.tx},${p.tz}`; }
+    }
+    notice(p, `Heading to ${rec.biz ? rec.biz.name : 'your lot'}.`);
+  });
+  // Put a lot up for sale to other players (ask 0 takes it off the market). Must be standing at it.
+  socket.on('lotAsk', (req) => {
+    if (!req || typeof req !== 'object') return;
+    const l = lotNear(p, req.id, true);
+    if (!l) return;
+    const rec = LOTS[p.city].get(req.id);
+    if (!rec || rec.owner !== p.userId) return notice(p, 'That is not your lot.');
+    const ask = Math.round(Number(req.ask));
+    if (!ask) { rec.ask = 0; saveLot(p.city, req.id); broadcastLots(p.city); sendBiz(p, req.id); return notice(p, 'Taken off the market.'); }
+    const worth = lotWorth(p.city, l, rec);
+    if (!isAsk(ask, worth)) return notice(p, `Ask between ₦${Math.ceil(worth * 0.3).toLocaleString('en-US')} and ₦${(worth * 20).toLocaleString('en-US')}.`);
+    rec.ask = ask;
+    saveLot(p.city, req.id);
+    notice(p, `Listed for ₦${ask.toLocaleString('en-US')}. You get ₦${marketNet(ask).toLocaleString('en-US')} after the ${Math.round(MARKET_FEE * 100)}% fee.`);
+    broadcastLots(p.city);
+    sendBiz(p, req.id);
+  });
+  socket.on('marketOpen', () => {
+    const out = [];
+    for (const c of CITY_IDS) for (const [id, rec] of LOTS[c]) {
+      if (!rec.ask || rec.owner === p.userId) continue;
+      out.push({ city: c, cityName: CITIES[c].name, id, seller: rec.ownerName, ask: rec.ask, kind: rec.biz ? rec.biz.kind : null, name: rec.biz ? rec.biz.name : null, level: rec.biz ? rec.biz.level : 0, auto: Boolean(rec.biz && isAuto(rec.biz)) });
+    }
+    out.sort((a, b) => a.ask - b.ask);
+    socket.emit('market', { list: out.slice(0, 60), owned: LOTS_OWNED(p), max: MAX_LOTS });
+  });
+  socket.on('marketBuy', (req) => {
+    if (!req || typeof req !== 'object' || !CITY_CTX[req.city]) return;
+    const rec = LOTS[req.city].get(req.id);
+    if (!rec || !rec.ask) return notice(p, 'That lot is no longer for sale.');
+    if (rec.owner === p.userId) return notice(p, 'That is your own lot.');
+    if (req.ask !== rec.ask) return notice(p, 'The price just changed. Look again.');
+    if (LOTS_OWNED(p) >= MAX_LOTS) return notice(p, `You can own at most ${MAX_LOTS} lots.`);
+    if (p.cash < rec.ask) return notice(p, `That lot costs ₦${rec.ask.toLocaleString('en-US')}.`);
+    const price = rec.ask, seller = rec.owner, what = rec.biz ? rec.biz.name : 'a lot';
+    p.cash -= price;
+    rec.owner = p.userId; rec.ownerName = p.name; rec.ask = 0;
+    for (const o of [...players.values()]) if (o.room === 'biz' && o.city === req.city && o.bizLot === req.id && o.userId !== p.userId) { const l = CITY_CTX[req.city].layout.lots[req.id]; moveNow(o, 'street', l.door.x, l.door.z, req.city); notice(o, 'The business changed hands. You were shown out.'); }
+    saveLot(req.city, req.id);
+    payUser(seller, marketNet(price), `${p.name} bought ${what} for ₦${price.toLocaleString('en-US')}. You received ₦${marketNet(price).toLocaleString('en-US')}.`);
+    notice(p, `You bought ${what} in ${CITIES[req.city].name} for ₦${price.toLocaleString('en-US')}.`);
+    broadcastLots(req.city);
+    sendProps();
+    socket.emit('marketDone');
   });
 
   socket.on('laptopsOpen', () => sendLaptops(p));
@@ -3588,9 +3733,24 @@ setInterval(() => {
       while (p.path.length > 1 && Math.hypot(p.path[0].x - p.x, p.path[0].z - p.z) < 0.35) p.path.shift();
       gx = p.path[0].x; gz = p.path[0].z;
     } else p.path = null;
+    if (p.fxEnd && now >= p.fxEnd.at) {   // the short bed, tub or toilet animation is over: stand up where you came from
+      p.sit = false; p.anim = null; p.sitF = null; p.frozenUntil = 0;
+      p.x = p.tx = p.fxEnd.out.x; p.z = p.tz = p.fxEnd.out.z; p.fxEnd = null; p.path = null; gx = p.x; gz = p.z;
+    }
     if (p.sitTo) {   // walking to a chair: sit when close (the chair itself is solid), give up if it takes too long
-      if (Math.hypot(p.sitTo.x - p.x, p.sitTo.z - p.z) < 1.5) { p.x = p.tx = p.sitTo.x; p.z = p.tz = p.sitTo.z; p.sit = true; p.sitTo = null; p.path = null; gx = p.x; gz = p.z; }
-      else if (now > p.sitTo.until) { p.sitTo = null; p.tx = p.x; p.tz = p.z; notice(p, 'You could not get to that chair.'); }
+      if (Math.hypot(p.sitTo.x - p.x, p.sitTo.z - p.z) < p.sitTo.reach) {
+        const st = p.sitTo, from = { x: p.x, z: p.z };
+        p.x = p.tx = st.x; p.z = p.tz = st.z; p.sitTo = null; p.path = null; gx = p.x; gz = p.z; p.sitF = st.f;
+        if (st.fx) fixtureOn(p, st, from, now);
+        else {
+          p.sit = true;
+          if (p.wfh) {   // seated at the desk: now the shift can start
+            const w = p.wfh; p.wfh = null;
+            const job = slotJob(p, w.slot);
+            if (job && !p.sick && !p.burnout && !p.shift) beginShift(p, w.slot, job); else notice(p, 'You could not start the shift.');
+          }
+        }
+      } else if (now > p.sitTo.until) { p.sitTo = null; p.wfh = null; p.tx = p.x; p.tz = p.z; notice(p, 'You could not get to that chair.'); }
     }
     const dx = gx - p.x;
     const dz = gz - p.z;

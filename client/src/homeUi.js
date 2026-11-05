@@ -267,7 +267,7 @@ export function initHome(socket, hooks = {}) {
   $('decoRight').addEventListener('click', () => nudge(1, 0));
   $('decoTurn').addEventListener('click', () => {
     const it = cur();
-    if (it && it.placed) socket.emit('homePlace', { uid: it.uid, x: it.x, z: it.z, rot: it.rot ? 0 : 1 });
+    if (it && it.placed) socket.emit('homePlace', { uid: it.uid, x: it.x, z: it.z, rot: ((it.rot || 0) + 1) % 4 });
   });
 
   socket.on('home', (h) => {

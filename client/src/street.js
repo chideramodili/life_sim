@@ -911,15 +911,15 @@ export function createCity(info) {
         for (const sx of [-1, 1]) { const sd = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1, l.d), fm); sd.position.set(l.x + sx * l.w / 2, 0.5, l.z); grp.add(sd); }
         if (st.kind) {
           const col = KCOL[st.kind] || '#ffc857';
-          const shop = new THREE.Mesh(new THREE.BoxGeometry(Math.min(10, l.w - 3), 3.4 + (st.level || 1) * 0.5, 5), new THREE.MeshStandardMaterial({ color: '#efe6d2', roughness: 0.9 }));
+          const shop = new THREE.Mesh(new THREE.BoxGeometry(Math.min(10, l.w - 3), 3.4 + Math.min(st.level || 1, 3) * 0.5, 5), new THREE.MeshStandardMaterial({ color: '#efe6d2', roughness: 0.9 }));
           shop.position.set(l.x, shop.geometry.parameters.height / 2, l.z - sgn * 1.5); grp.add(shop);
           const awn = new THREE.Mesh(new THREE.BoxGeometry(Math.min(10, l.w - 3) + 0.6, 0.25, 2), new THREE.MeshStandardMaterial({ color: col }));
           awn.position.set(l.x, 3, l.z + sgn * 1.4); grp.add(awn);
-          grp.add(sign(st.soldOut ? `${st.name} · sold out` : st.name, col, l.x, 5.6 + (st.level || 1) * 0.5, l.z));
+          grp.add(sign((st.soldOut ? `${st.name} · sold out` : st.name) + (st.level >= 4 ? ' ★' : '') + (st.ask ? ' · for sale' : ''), col, l.x, 5.6 + Math.min(st.level || 1, 3) * 0.5, l.z));
         } else if (st.owner) {
-          grp.add(sign(`${String(st.owner).slice(0, 12)}'s lot`, '#8a8f98', l.x, 3.2, l.z));
+          grp.add(sign(st.ask ? `${String(st.owner).slice(0, 12)}'s lot · for sale ₦${Math.round(st.ask / 1000)}k` : `${String(st.owner).slice(0, 12)}'s lot`, st.ask ? '#4ca3ff' : '#8a8f98', l.x, 3.2, l.z));
         } else {
-          grp.add(sign(`FOR SALE · ₦${Math.round(l.price / 1000)}k`, '#3ddc97', l.x, 3.2, l.z));
+          grp.add(sign(`FOR SALE · ₦${Math.round((st.price || l.price) / 1000)}k`, '#3ddc97', l.x, 3.2, l.z));
         }
         root.add(grp);
         lotObjs.push(grp);

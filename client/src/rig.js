@@ -147,8 +147,14 @@ export function poseSit(rig, group, drop = 0.45, lean = 0) {
     turn(rig, side + 'UpLeg', -1.45, 0, 0, 1);
     turn(rig, side + 'Leg', 1.45, 0, 0, 1);
     turn(rig, side + 'Foot', -0.1, 0, 0, 1);
-    turn(rig, side + 'Arm', 0.25, 0, side === 'Left' ? -0.55 : 0.55, 1);
-    turn(rig, side + 'ForeArm', 0.9, 0, 0, 1);
+    const st = rig.stand && rig.stand[side];
+    if (st) {   // this model's own arms-down angles, with the forearms bent so the hands rest on the lap
+      turn(rig, side + 'Arm', st.a[0] + 0.2, st.a[1], st.a[2], 1);
+      turn(rig, side + 'ForeArm', st.f[0] + 0.7, st.f[1], st.f[2], 1);
+    } else {
+      turn(rig, side + 'Arm', 0.25, 0, side === 'Left' ? -0.55 : 0.55, 1);
+      turn(rig, side + 'ForeArm', 0.9, 0, 0, 1);
+    }
   }
   turn(rig, 'Spine', lean, 0, 0, 1);
 }
@@ -187,6 +193,7 @@ export function exerciseTilt(kind, t) {
   const up = (Math.sin(t * 4.2) + 1) / 2;
   if (kind === 2) return { x: 1.42 - 0.3 * (1 - up) * 0.9, y: 0.0 };
   if (kind === 3) return { x: -1.5, y: 0.14 };
+  if (kind === 10) return { x: -1.5708, y: 0.86 };   // lying on your own (lower) bed at home
   if (kind === 9) return { x: -1.5708, y: 0.98 };   // lying on a hospital bed, face up, head towards the back wall
   return { x: 0, y: 0 };
 }

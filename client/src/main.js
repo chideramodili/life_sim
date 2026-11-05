@@ -9,6 +9,7 @@ import { initLook } from './settingsUi.js';
 import { initWorld } from './worldUi.js';
 import { initLife } from './lifeUi.js';
 import { initStaff } from './staffUi.js';
+import { initProps } from './propsUi.js';
 import { initSocial } from './socialUi.js';
 import { loadModel, whenModelReady, attachModel, animateModel, applyLook, detachModel } from './model.js';
 import { decodeLook2, DEFAULT_LOOK2 } from './person2.js';
@@ -28,7 +29,7 @@ import { initBank } from './bankUi.js';
 import { initHome } from './homeUi.js';
 import { initFashion } from './fashionUi.js';
 import { setPicGender } from './shopPics.js';
-import { makeVehicle, loadCar, carReady, carClone, spinWheels } from './vehicles.js';
+import { makeVehicle, loadCar, carReady, carClone, spinWheels, driverSeat } from './vehicles.js';
 import { dressAvatar } from './outfit.js';
 import { initPhoto } from './photo.js';
 import { createCity } from './street.js';
@@ -57,6 +58,7 @@ const chatUi = initChat(socket);
 const world = initWorld(socket);
 const life = initLife(socket);
 initStaff(socket);
+initProps(socket);
 const social = initSocial(socket);
 const phonesUi = initPhones(socket);
 const radioUi = initRadio();
@@ -423,6 +425,7 @@ socket.on('state', ({ room, players, cars, lvl, cops, ph }) => {
     a.working = Boolean(p.work);
     a.group.userData.work = typeof p.work === 'string' ? { style: p.work, face: p.wf != null ? p.wf : null } : null;
     a.sit = Boolean(p.sit);
+    a.sitF = p.sf != null ? p.sf : null;
     a.lying = Boolean(p.lie);
     a.exercise = p.an || 0;
     // Riding: hide the person and show the vehicle they are in.
@@ -436,7 +439,7 @@ socket.on('state', ({ room, players, cars, lvl, cops, ph }) => {
         scene.add(a.veh);
       }
       a.ry = p.ry || 0;
-      a.group.visible = p.ride === 'bike';   // on a motorbike you see the rider; in a car, bus or taxi you are inside
+      a.group.visible = p.ride === 'bike' || (p.ride === 'car' && Boolean(p.rm) && !(p.id === myId && (seatView || fpv)));   // you see the rider on a motorbike and the driver of an own car; in a bus or taxi you are inside
     } else if (a.veh) {
       scene.remove(a.veh);
       a.veh = null;
@@ -453,6 +456,8 @@ socket.on('state', ({ room, players, cars, lvl, cops, ph }) => {
   }
 });
 
+// Who you can see in a vehicle: a rider on a motorbike, and the driver of your own car (not in a bus or taxi: you are inside those).
+const showsRider = (a) => a.vehKind === 'bike' || (a.vehKind === 'car' && Boolean(a.vehModel));
 // ---------- Driving ----------
 let meDriving = false, driveCockpit = null;
 function updateDrive(m) {
@@ -1074,7 +1079,7 @@ async function leaveCabin() {
   document.body.classList.remove('seated');
   $('fpvBtn').hidden = Boolean(roomInfoNow && roomInfoNow.city);
   const a = avatars.get(myId);
-  if (a) a.group.visible = !a.veh || a.vehKind === 'bike';
+  if (a) a.group.visible = !a.veh || showsRider(a);
   await fade(0, 600);
   cabinBusy = false;
 }
@@ -1097,7 +1102,7 @@ function setSeatView(on) {
   camera.fov = on ? 70 : 45; camera.updateProjectionMatrix();
   seatLook = 0;
   document.body.classList.toggle('driverView', on);
-  if (!on) { if (me) { me.group.visible = !me.veh || me.vehKind === 'bike'; if (me.veh) me.veh.visible = true; } snapCam = true; dropCockpit(); }
+  if (!on) { if (me) { me.group.visible = !me.veh || showsRider(me); if (me.veh) me.veh.visible = true; } snapCam = true; dropCockpit(); }
   $('seatBtn').textContent = on ? '🧍 Outside view' : '🚗 Driver view';
   $('seatBtn').classList.toggle('on', on);
 }
@@ -1133,7 +1138,7 @@ $('sitBtn').addEventListener('click', () => {
   let best = null, bd = 6;
   for (const s of spots) { const d = Math.hypot(s.x - a.group.position.x, s.z - a.group.position.z); if (d < bd) { bd = d; best = s; } }
   if (!best) { notice('There is no chair nearby to sit on.'); return; }
-  socket.emit('sit', { x: best.x, z: best.z });
+  socket.emit('sit', { x: best.x, z: best.z, f: best.f });
 });
 $('bedBtn').addEventListener('click', () => socket.emit('restBed'));
 let sitTick = 0;
@@ -1413,20 +1418,30 @@ renderer.setAnimationLoop(() => {
         a.group.userData.reach = (a.group.userData.reach || 0) + (wantReach - (a.group.userData.reach || 0)) * Math.min(1, dt * 8);
       } else a.group.userData.reach = 0;
       // Sitting near a table or desk: face it, with the legs going under it (and a laptop to type on).
+      a.group.userData.sitFace = a.sitF != null ? a.sitF : null;
       if (a.sit && !a.veh) {
         const tabs = currentRoom === 'home' || currentRoom === 'friendhome' ? furniture.tables() : interior.tables();
         const px = a.group.position.x, pz = a.group.position.z;
-        let bestT = null, bd = 1.5;
-        for (const t of tabs) { const qx = Math.max(t.x - t.hw, Math.min(t.x + t.hw, px)), qz = Math.max(t.z - t.hd, Math.min(t.z + t.hd, pz)); const dd = Math.hypot(qx - px, qz - pz); if (dd < bd) { bd = dd; bestT = { qx, qz, t }; } }
-        if (bestT) {
-          let ang = a.group.userData.sitDesk ? a.group.userData.sitDesk.face : a.heading || 0;
-          if (bd > 0.05) ang = Math.atan2(bestT.qx - px, bestT.qz - pz);
-          else { const ox = bestT.t.x - px, oz = bestT.t.z - pz; if (Math.hypot(ox, oz) > 0.05) ang = Math.atan2(ox, oz); }
-          a.group.userData.sitDesk = { face: Math.round(ang / (Math.PI / 2)) * (Math.PI / 2) };
-        } else a.group.userData.sitDesk = null;
+        if (a.sitF != null) {
+          // You sit the way the chair faces. Only if a desk or table is right in front of the chair do the legs go under it.
+          const qx = px + Math.sin(a.sitF) * 0.8, qz = pz + Math.cos(a.sitF) * 0.8;
+          const atDesk = tabs.some((t) => Math.abs(qx - t.x) <= t.hw + 0.25 && Math.abs(qz - t.z) <= t.hd + 0.25);
+          a.group.userData.sitDesk = atDesk ? { face: a.sitF, typing: a.working } : null;
+        } else {
+          let bestT = null, bd = 1.5;
+          for (const t of tabs) { const qx = Math.max(t.x - t.hw, Math.min(t.x + t.hw, px)), qz = Math.max(t.z - t.hd, Math.min(t.z + t.hd, pz)); const dd = Math.hypot(qx - px, qz - pz); if (dd < bd) { bd = dd; bestT = { qx, qz, t }; } }
+          if (bestT) {
+            let ang = a.group.userData.sitDesk ? a.group.userData.sitDesk.face : a.heading || 0;
+            if (bd > 0.05) ang = Math.atan2(bestT.qx - px, bestT.qz - pz);
+            else { const ox = bestT.t.x - px, oz = bestT.t.z - pz; if (Math.hypot(ox, oz) > 0.05) ang = Math.atan2(ox, oz); }
+            a.group.userData.sitDesk = { face: Math.round(ang / (Math.PI / 2)) * (Math.PI / 2), typing: a.working };
+          } else a.group.userData.sitDesk = null;
+        }
       } else a.group.userData.sitDesk = null;
       const onBike = a.veh && a.vehKind === 'bike';
-      animateModel(a.group, dt, a.speed, onBike ? a.ry : a.heading, a.working && !onBike, tnow, onBike ? 'bike' : a.sit && !a.veh, onBike ? 0 : a.exercise || 0);
+      const inCar = a.veh && a.vehKind === 'car' && a.vehModel;
+      if (inCar) a.group.userData.seat = driverSeat(a.vehModel);
+      animateModel(a.group, dt, a.speed, onBike || inCar ? a.ry : a.heading, a.working && !onBike && !inCar, tnow, onBike ? 'bike' : inCar ? 'car' : a.sit && !a.veh, onBike || inCar ? 0 : a.exercise || 0);
     }
     if (a.veh) {
       { const dx = a.group.position.x - a.veh.position.x, dz = a.group.position.z - a.veh.position.z; const dd = Math.hypot(dx, dz); if (dd > 0.001 && dd < 5) spinWheels(a.veh, dd * (dx * Math.sin(a.veh.rotation.y) + dz * Math.cos(a.veh.rotation.y) >= 0 ? 1 : -1)); }

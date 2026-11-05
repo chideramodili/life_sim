@@ -297,3 +297,16 @@ body.clean .tbPill, body.clean #dock button, body.clean .dockBtn, body.clean #ch
 body.clean #needsStrip, body.clean #hud, #island, body.clean #actions > button {
   -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
 }
+
+/* Music moves into the phone's island while the phone is open */
+body.phoneOpen #island.on { opacity: 0; pointer-events: none; }
+#phoneNotch { display: flex; align-items: center; justify-content: center; gap: 6px; overflow: hidden; transition: width .25s; }
+#phoneNotch.music { width: 170px; padding: 0 10px; }
+#phoneNotch .npDisc, #phoneNotch .npBars, #phoneNotch .npName { display: none; }
+#phoneNotch.music .npDisc { display: block; flex: none; width: 16px; height: 16px; border-radius: 50%; background: conic-gradient(#3ddc97, #1a1a22, #3ddc97); animation: npSpin 3s linear infinite; }
+#phoneNotch.music .npName { display: block; flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #fff; font-size: 11px; text-align: left; }
+#phoneNotch.music .npBars { display: flex; flex: none; gap: 2px; align-items: flex-end; height: 12px; }
+#phoneNotch .npBars i { width: 3px; background: #3ddc97; border-radius: 1px; animation: npBar .8s ease-in-out infinite alternate; }
+#phoneNotch .npBars i:nth-child(1) { height: 5px; } #phoneNotch .npBars i:nth-child(2) { height: 11px; animation-delay: .2s; } #phoneNotch .npBars i:nth-child(3) { height: 7px; animation-delay: .4s; }
+@keyframes npSpin { to { transform: rotate(360deg); } }
+@keyframes npBar { to { transform: scaleY(.4); } }
