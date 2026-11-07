@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Adulthood</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="theme-color" content="#2b1b3d" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Adulthood" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <style>
+    :root {
+      --bg: #2b1b3d; --panel: rgba(43, 27, 61, 0.9); --bg2: #3d2a55; --track: #4a3668; --line: #8a6fb0;
+      --text: #fff4e0; --muted: #d9c9e8; --dim: #a995c4; --accent: #ff6b4a; --hi: #ffc857;
+      --on: #2b1b3d; --on-hi: #2b1b3d; --good: #8be0b0; --bad: #ff9f8a; --danger: #ff6b4a; --fs: 1;
+    }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); font-family: system-ui, sans-serif; }
+#app { position: fixed; inset: 0; touch-action: none; }
+button { font: inherit; cursor: pointer; }
+.panel {
+      position: fixed; padding: 12px; background: var(--panel);
+      color: var(--text); border-radius: 12px; font-size: calc(14px * var(--fs));
+    }
+.row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.pill { font-size: calc(12px * var(--fs)); font-weight: 600; padding: 2px 10px; border-radius: 10px; }
+.pill.Happy { background: #2f6f4f; color: #c6f7dc; }
+.pill.Okay { background: #7a5a1f; color: #ffe2a1; }
+.pill.Down { background: #7a2f2f; color: #ffc4b8; }
+#hud { top: 12px; left: 12px; width: 240px; box-sizing: border-box; }
+#logout { width: 100%; height: 32px; border: 0.5px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); font-size: calc(12px * var(--fs)); margin-bottom: 8px; }
+#notice { min-height: 18px; font-size: calc(12px * var(--fs)); color: var(--muted); }
+#hint { margin-top: 6px; font-size: calc(11px * var(--fs)); color: var(--dim); }
+#map, #trainPanel, #finesPanel, #cityPanel, #bizPanel, #interviewPanel, #gamePanel { top: 12px; right: 12px; width: 250px; }
+#stealBtn, #finesBtn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 130px; z-index: 6; padding: 11px 20px; border: 0; border-radius: 22px; background: #c0392b; color: #fff; font: inherit; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+#finesBtn { background: #3a6fdd; }
+#shiftBar { position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%); z-index: 9; width: min(320px, calc(100vw - 32px)); padding: 12px 14px; border-radius: 14px; background: rgba(20,26,34,.92); color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.45); text-align: center; }
+#shiftText { font-weight: 700; margin-bottom: 8px; }
+#shiftTrack { height: 10px; border-radius: 6px; background: rgba(255,255,255,.18); overflow: hidden; margin-bottom: 10px; }
+#shiftFill { height: 100%; width: 0; background: #3ddc97; transition: width .9s linear; }
+.perkLine { font-size: 12px; color: #3ddc97; margin-top: 2px; }
+#driveBtn, #parkBtn { position: fixed; right: 16px; bottom: 150px; z-index: 6; padding: 11px 16px; border: 0; border-radius: 22px; background: #2e7d5b; color: #fff; font: inherit; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+#parkBtn { background: #555c66; }
+#speedo { position: fixed; right: 16px; bottom: 210px; z-index: 6; padding: 6px 12px; border-radius: 10px; background: rgba(0,0,0,.55); color: #fff; font-weight: 700; }
+#wantedBanner { position: fixed; top: 215px; left: 50%; transform: translateX(-50%); z-index: 8; padding: 8px 16px; border-radius: 10px; background: #b3202a; color: #fff; font-weight: 700; animation: wantedFlash 0.8s infinite alternate; }
+@keyframes wantedFlash { from { background: #b3202a; } to { background: #1f3a8a; } }
+#joy { position: fixed; left: 18px; bottom: 96px; width: 124px; height: 124px; border-radius: 50%; background: rgba(255,255,255,.12); border: 2px solid rgba(255,255,255,.3); z-index: 7; touch-action: none; display: flex; align-items: center; justify-content: center; }
+#joy[hidden] { display: none; }
+#joyKnob { width: 54px; height: 54px; border-radius: 50%; background: rgba(255,255,255,.5); box-shadow: 0 2px 8px rgba(0,0,0,.4); pointer-events: none; }
+#knockBox { position: fixed; top: 215px; left: 50%; transform: translateX(-50%); z-index: 9; display: flex; flex-direction: column; gap: 6px; width: min(340px, calc(100vw - 24px)); }
+.knockRow { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px; background: #2b3a2f; color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.knockRow span { flex: 1; } .knockRow button { padding: 6px 10px; border: 0; border-radius: 8px; background: #3ddc97; color: #10261b; font: inherit; font-weight: 600; cursor: pointer; } .knockRow button.no { background: #555c66; color: #fff; }
+#jailBanner { position: fixed; top: 215px; left: 50%; transform: translateX(-50%); z-index: 7; padding: 8px 16px; border-radius: 10px; background: #34476b; color: #fff; font-weight: 600; }
+.finesHead { font-weight: 700; margin-bottom: 6px; } .finesWarn { color: #ff9b8a; margin-bottom: 6px; } .finesNote { opacity: .75; margin-top: 6px; font-size: 13px; }
+.finesAll { margin-top: 6px; padding: 7px 14px; border: 0; border-radius: 8px; background: var(--hi); color: var(--on-hi); font: inherit; cursor: pointer; }
+body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !important; }
+#fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 30; transition: opacity .45s ease; }
+#cabinHint { position: fixed; left: 50%; transform: translateX(-50%); bottom: 90px; z-index: 6; padding: 8px 14px; border-radius: 16px; background: rgba(20,18,30,.75); color: #fff; font-size: 13px; pointer-events: none; }
+#bizBtn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 190px; z-index: 6; padding: 11px 20px; border: 0; border-radius: 22px; background: #3ddc97; color: #10261c; font: inherit; font-weight: 700; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+#bizBody input { width: 100%; box-sizing: border-box; margin: 6px 0; padding: 8px; border-radius: 8px; border: 1px solid #5b5470; background: #1b1726; color: #fff; font: inherit; }
+#bizBody button { display: block; width: 100%; margin-top: 6px; text-align: left; }
+#gameBtn { position: fixed; right: 12px; top: 148px; z-index: 6; padding: 8px 12px; border: 0; border-radius: 18px; background: rgba(0,0,0,0.55); color: #fff; font: inherit; font-size: 13px; }
+#gameBody .gbtn { display: block; width: 100%; margin-top: 6px; text-align: left; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--track); background: transparent; color: inherit; }
+#gameBody .gbtn.on { background: #3ddc97; color: #10261b; border-color: #3ddc97; }
+.chess { display: grid; grid-template-columns: repeat(8, 1fr); width: 100%; max-width: 320px; aspect-ratio: 1; margin: 8px auto; border: 2px solid #5a4a3a; }
+.chess .sq { display: flex; align-items: center; justify-content: center; font-size: 26px; line-height: 1; background: #e9d8b4; color: #111; cursor: pointer; position: relative; user-select: none; }
+.chess .sq.dark { background: #a97c50; }
+.chess .sq.sel { outline: 3px solid #3a86ff; outline-offset: -3px; }
+.chess .sq.opt::after { content: ''; position: absolute; width: 30%; height: 30%; border-radius: 50%; background: rgba(40,160,90,.7); }
+.chess .sq.last { box-shadow: inset 0 0 0 3px rgba(255,200,40,.8); }
+.cards { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; } .card { padding: 8px 10px; border-radius: 6px; background: #fff; color: #111; font-weight: 700; min-width: 34px; text-align: center; } .card.red { color: #c0262d; } .card.back { background: #3a4a6b; color: #3a4a6b; }
+.wordBig { font-size: 32px; letter-spacing: 6px; text-align: center; font-weight: 700; margin: 12px 0; text-transform: uppercase; }
+#interviewBody .ivOpt { display: block; width: 100%; margin-top: 6px; text-align: left; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--track); background: transparent; color: inherit; }
+#interviewBody .ivOpt.on { background: #3ddc97; color: #10261b; border-color: #3ddc97; }
+#interviewBody .work { display: block; width: 100%; margin-top: 10px; padding: 10px; }
+#cityBtn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 180px; z-index: 6; padding: 11px 20px; border: 0; border-radius: 22px; background: #ff7a3a; color: #fff; font: inherit; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+#trainBtn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 130px; z-index: 6; padding: 11px 20px; border: 0; border-radius: 22px; background: #3a86ff; color: #fff; font: inherit; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.trainLine { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; }
+.trainLine button { padding: 6px 12px; border: 0; border-radius: 8px; background: var(--hi); color: var(--on-hi); font: inherit; cursor: pointer; }
+.mapHead { display: flex; justify-content: space-between; align-items: center; font-weight: 600; margin-bottom: 8px; }
+.closeX { border: 0; background: transparent; color: var(--text); font-size: calc(20px * var(--fs)); line-height: 1; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.chip { border: 0.5px solid var(--line); background: transparent; color: var(--text); border-radius: 14px; padding: 5px 10px; font-size: calc(12px * var(--fs)); }
+.chip.on { background: var(--hi); color: var(--on-hi); border-color: var(--hi); }
+.dest { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-top: 0.5px solid var(--track); }
+.dest button { border: 0; border-radius: 8px; background: var(--accent); color: var(--on); font-weight: 600; padding: 6px 14px; }
+.dest .tag { font-size: calc(12px * var(--fs)); color: var(--muted); }
+#trip { top: 215px; left: 50%; transform: translateX(-50%); width: 240px; text-align: center; }
+.tbar { height: 6px; border-radius: 3px; background: var(--track); margin-top: 8px; }
+#tripFill { height: 6px; border-radius: 3px; background: var(--hi); width: 0%; }
+#skipRide { margin-top: 10px; padding: 7px 16px; border: 0; border-radius: 8px; background: var(--hi); color: #fff; font: inherit; cursor: pointer; }
+/* Needs strip (always visible) and needs sheet (opens when you tap the strip) */
+    #needsStrip { bottom: 12px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; padding: 8px 10px; cursor: pointer; width: max-content; max-width: calc(100vw - 24px); box-sizing: border-box; }
+.sitem { width: 46px; }
+.slab { font-size: calc(10px * var(--fs)); color: var(--muted); text-align: center; margin-bottom: 4px; }
+.sbar { height: 5px; border-radius: 3px; background: var(--track); }
+.sfill { height: 5px; border-radius: 3px; width: 0%; background: var(--hi); }
+#sheet { bottom: 70px; left: 50%; transform: translateX(-50%); width: min(360px, calc(100vw - 24px)); box-sizing: border-box; }
+.sheetHead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; font-weight: 600; }
+.headRight { display: flex; align-items: center; gap: 8px; }
+.nrow { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 0.5px solid var(--track); }
+.nlabel { width: 52px; font-size: calc(13px * var(--fs)); color: var(--muted); }
+.nbar { flex: 1; height: 6px; border-radius: 3px; background: var(--track); }
+.nfill { height: 6px; border-radius: 3px; width: 0%; background: var(--hi); }
+.npct { width: 34px; text-align: right; font-size: calc(12px * var(--fs)); }
+.nbtn { width: 84px; height: 30px; border: 0; border-radius: 8px; background: var(--accent); color: var(--on); font-size: calc(12px * var(--fs)); font-weight: 600; }
+.sheetNote { margin-top: 8px; font-size: calc(11px * var(--fs)); color: var(--dim); }
+/* Story: chip, journal, chapter card, event pop-up, message banner, and chat sheet */
+    #chip { top: 12px; left: 50%; transform: translateX(-50%); width: 250px; box-sizing: border-box; cursor: pointer; padding: 8px 12px; }
+#chipTitle { font-weight: 600; font-size: calc(13px * var(--fs)); }
+#chipBadge { background: var(--accent); color: var(--on); border-radius: 8px; padding: 0 6px; font-size: calc(11px * var(--fs)); font-weight: 700; margin-left: 6px; }
+#chipNext { font-size: calc(12px * var(--fs)); color: var(--muted); margin-top: 2px; }
+#journal { bottom: 70px; left: 50%; transform: translateX(-50%); width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 60vh; overflow-y: auto; }
+.jlabel { font-size: calc(12px * var(--fs)); color: var(--dim); margin: 10px 0 4px; }
+.obj { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: calc(13px * var(--fs)); }
+.obj.done { color: var(--good); }
+.saved { display: flex; flex-wrap: wrap; gap: 6px; }
+.tagc { background: var(--bg2); color: var(--hi); font-size: calc(11px * var(--fs)); padding: 2px 8px; border-radius: 8px; }
+.fine { font-size: calc(12px * var(--fs)); color: var(--dim); margin-top: 8px; }
+#backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 8; }
+#modal { top: 90px; left: 50%; transform: translateX(-50%); width: min(340px, 90vw); padding: 18px; z-index: 9; box-sizing: border-box; max-height: calc(100vh - 120px); overflow-y: auto; }
+.kicker { font-size: calc(11px * var(--fs)); letter-spacing: 1px; text-transform: uppercase; color: var(--hi); }
+.mtitle { font-size: calc(18px * var(--fs)); font-weight: 700; margin: 4px 0; }
+.mtext { font-size: calc(14px * var(--fs)); color: var(--muted); margin: 6px 0 10px; line-height: 1.5; }
+.reward { display: inline-block; background: var(--bg2); color: var(--hi); border-radius: 8px; padding: 4px 10px; font-size: calc(12px * var(--fs)); margin: 8px 0 12px; }
+.recap { font-size: calc(13px * var(--fs)); color: var(--muted); margin: 10px 0; line-height: 1.6; }
+.choice { display: block; width: 100%; min-height: 40px; margin-bottom: 8px; padding: 8px 12px; border-radius: 10px; border: 0.5px solid var(--line); background: var(--bg2); color: var(--text); font-size: calc(14px * var(--fs)); text-align: left; }
+.bub { max-width: 85%; background: var(--bg2); border-radius: 12px; padding: 8px 12px; font-size: calc(14px * var(--fs)); margin: 8px 0; line-height: 1.4; }
+.bub.me { margin-left: auto; background: var(--hi); color: var(--on-hi); }
+.chiprow { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 12px; }
+.rchip { font-size: calc(12px * var(--fs)); padding: 2px 10px; border-radius: 10px; font-weight: 600; }
+.rchip.good { background: #2f6f4f; color: #c6f7dc; }
+.rchip.bad { background: #7a5a1f; color: #ffe2a1; }
+#banner { top: 70px; left: 50%; transform: translateX(-50%); width: min(340px, 92vw); box-sizing: border-box; z-index: 7; }
+.brow { display: flex; gap: 10px; align-items: flex-start; }
+.avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--accent); flex: none; }
+.bwho { font-weight: 600; font-size: calc(13px * var(--fs)); }
+.bprev { font-size: calc(12px * var(--fs)); color: var(--muted); margin-top: 2px; }
+.bbtns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.mini { height: 30px; padding: 0 14px; border-radius: 8px; border: 0.5px solid var(--line); background: transparent; color: var(--text); font-size: calc(13px * var(--fs)); }
+.mini.hot { background: var(--accent); border-color: var(--accent); color: var(--on); font-weight: 600; }
+#chat { bottom: 0; left: 50%; transform: translateX(-50%); width: min(400px, 100vw); box-sizing: border-box; border-radius: 16px 16px 0 0; z-index: 9; padding: 16px; max-height: 80vh; overflow-y: auto; }
+.chead { display: flex; justify-content: space-between; align-items: center; font-weight: 700; }
+#chatBadge { display: inline-block; background: var(--bg); color: var(--hi); border-radius: 8px; padding: 0 7px; font-size: calc(12px * var(--fs)); margin-left: 6px; }
+#workBtn, #workBtn2 { width: 100%; height: 40px; border: 0; border-radius: 10px; font-weight: 600; color: #0f3d2e; background: #3ddc97; margin-bottom: 8px; }
+#chatPanel { bottom: 70px; left: 12px; width: min(340px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; }
+#chatList { height: 190px; overflow-y: auto; padding-right: 4px; }
+.cm { font-size: calc(13px * var(--fs)); padding: 4px 0; line-height: 1.4; word-break: break-word; }
+.cm .nm { font-weight: 600; color: var(--hi); }
+.cm.self .nm { color: var(--good); }
+.cm.sys { color: var(--dim); font-style: italic; }
+.cm.mrow { display: flex; justify-content: space-between; align-items: center; }
+.cline { display: flex; align-items: flex-start; gap: 4px; }
+.cline > span:nth-child(2) { flex: 1; }
+.dots { border: 0; background: transparent; color: var(--dim); font-size: calc(16px * var(--fs)); line-height: 1; padding: 0 4px; }
+.cmenu { display: flex; gap: 6px; margin: 6px 0 4px; }
+#chatForm { display: flex; gap: 6px; margin-top: 8px; }
+#chatInput { flex: 1; min-width: 0; height: 38px; box-sizing: border-box; padding: 0 10px; border: 0.5px solid var(--line); border-radius: 10px; background: var(--bg2); color: var(--text); font-size: calc(16px * var(--fs)); }
+/* Login, forgot password, and recovery code screens */
+    #auth, #reset, #recovery { top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(320px, 88vw); padding: 20px; z-index: 10; box-sizing: border-box; }
+.logo { font-size: calc(22px * var(--fs)); font-weight: 700; letter-spacing: 2px; color: var(--hi); text-align: center; }
+.sub { text-align: center; color: var(--muted); margin: 4px 0 16px; font-size: calc(13px * var(--fs)); }
+.field {
+      width: 100%; height: 42px; box-sizing: border-box; margin-bottom: 10px; padding: 0 12px;
+      border: 0.5px solid var(--line); border-radius: 10px; background: var(--bg2); color: var(--text); font-size: calc(16px * var(--fs));
+    }
+.field::placeholder { color: var(--dim); }
+.err { min-height: 18px; margin-bottom: 8px; font-size: calc(13px * var(--fs)); color: var(--bad); }
+.err.good { color: var(--good); }
+.big { width: 100%; height: 44px; border-radius: 10px; font-weight: 600; margin-bottom: 8px; border: 0; background: var(--accent); color: var(--on); }
+.alt { width: 100%; height: 44px; border-radius: 10px; font-weight: 600; margin-bottom: 8px; border: 0.5px solid var(--hi); background: transparent; color: var(--hi); }
+.link { display: block; width: 100%; border: 0; background: transparent; color: var(--muted); font-size: calc(13px * var(--fs)); text-decoration: underline; padding: 6px; }
+#codeText { font-family: ui-monospace, Consolas, monospace; font-size: calc(22px * var(--fs)); letter-spacing: 2px; text-align: center; color: var(--hi); background: var(--bg2); border-radius: 10px; padding: 14px 6px; margin: 12px 0; user-select: all; word-break: break-all; }
+#recMsg { font-size: calc(13px * var(--fs)); color: var(--muted); line-height: 1.5; }
+
+    /* Top buttons, the Look panel, and the logo */
+    .btnrow { display: flex; gap: 6px; margin-bottom: 8px; }
+    .btnrow button { flex: 1; height: 36px; border: 0; border-radius: 10px; font-weight: 600; font-size: calc(13px * var(--fs)); position: relative; }
+    #mapBtn { background: var(--hi); color: var(--on-hi); }
+    #chatBtn { background: var(--accent); color: var(--on); }
+    #lookBtn { background: var(--bg2); color: var(--text); border: 0.5px solid var(--line); }
+    #lookPanel { bottom: 70px; left: 50%; transform: translateX(-50%); width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 70vh; overflow-y: auto; }
+    .swrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .pbtn { display: inline-flex; align-items: center; gap: 6px; border: 0.5px solid var(--line); background: transparent; color: var(--text); border-radius: 10px; padding: 8px 12px; font-size: calc(13px * var(--fs)); }
+    .pbtn.on { background: var(--hi); color: var(--on-hi); border-color: var(--hi); }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 0.5px solid var(--line); }
+    .swatch { width: 32px; height: 32px; border-radius: 50%; border: 2px solid transparent; padding: 0; }
+    .swatch.on { border-color: var(--text); }
+    .brand { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 14px; }
+    .brandName { font-size: calc(24px * var(--fs)); font-weight: 800; letter-spacing: 3px; color: var(--hi); text-transform: uppercase; }
+    .brandTag { font-size: calc(12px * var(--fs)); color: var(--muted); text-align: center; }
+
+    /* Clock, city event line, and the Bills panel */
+    #eventLine { margin: 6px 0; padding: 6px 8px; border-radius: 8px; background: var(--hi); color: var(--on-hi); font-size: calc(12px * var(--fs)); font-weight: 600; line-height: 1.35; }
+    #billsBtn { background: var(--bg2); color: var(--text); border: 0.5px solid var(--line); }
+    #billsBadge { position: absolute; top: -4px; right: -4px; width: 12px; height: 12px; border-radius: 50%; background: var(--danger); border: 2px solid var(--panel); }
+    #billsPanel { bottom: 70px; right: 12px; width: min(340px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 70vh; overflow-y: auto; }
+    .bill { padding: 10px 0; border-top: 0.5px solid var(--track); }
+    .billHead { display: flex; justify-content: space-between; align-items: center; }
+    .billName { font-weight: 700; }
+    .billWho { font-size: calc(12px * var(--fs)); color: var(--dim); }
+    .billWhen { font-size: calc(13px * var(--fs)); color: var(--muted); margin-top: 4px; }
+    .billNote { font-size: calc(12px * var(--fs)); color: var(--bad); margin-top: 4px; line-height: 1.4; }
+    .billPay { width: 100%; height: 36px; margin-top: 8px; }
+    .billPay:disabled { opacity: 0.55; cursor: default; background: transparent; color: var(--muted); border-color: var(--line); font-weight: 400; }
+    #hudMore { display: none; width: 100%; height: 30px; margin-bottom: 6px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: calc(12px * var(--fs)); }
+    .btnrow { flex-wrap: wrap; }
+    .btnrow button { flex: 1 1 22%; }
+    #skillsBtn { background: var(--bg2); color: var(--text); border: 0.5px solid var(--line); }
+    #jobsBtn { width: 100%; height: 40px; border: 0; border-radius: 10px; font-weight: 600; background: var(--hi); color: var(--on-hi); margin-bottom: 8px; }
+    #medBtn { width: 100%; height: 40px; border: 0; border-radius: 10px; font-weight: 600; background: var(--accent); color: var(--on); margin-bottom: 8px; }
+    #skillsPanel, #jobsPanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
+    .skill, .job { padding: 10px 0; border-top: 0.5px solid var(--track); }
+    .skillHead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .skillName { font-weight: 700; }
+    .skillXp { font-size: calc(12px * var(--fs)); color: var(--dim); margin: 4px 0 8px; }
+    .skillBtns { display: flex; flex-direction: column; gap: 6px; }
+    .modeWrap .mini { width: 100%; height: 34px; }
+    .modeWrap .mini:disabled { opacity: 0.55; cursor: default; background: transparent; color: var(--muted); border-color: var(--line); font-weight: 400; }
+    .modeWhy { font-size: calc(11px * var(--fs)); color: var(--dim); margin-top: 2px; }
+    .modeWhy.no { color: var(--bad); }
+    #stressRow { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 0.5px solid var(--track); }
+    #statusRow .pill { background: #7a2f2f; color: #ffc4b8; }
+    #peopleBtn { background: var(--bg2); color: var(--text); border: 0.5px solid var(--line); }
+    #peopleBadge { position: absolute; top: -4px; right: -4px; width: 12px; height: 12px; border-radius: 50%; background: var(--good); border: 2px solid var(--panel); }
+    #carsBtn, #phoneBtn { width: 100%; height: 40px; border: 0; border-radius: 10px; font-weight: 600; background: var(--hi); color: var(--on-hi); margin-bottom: 8px; }
+    #peoplePanel, #carsPanel, #phonePanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
+    .person { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 0.5px solid var(--track); }
+    .quest { padding: 8px 0; border-top: 0.5px solid var(--track); }
+    #dlgLine { white-space: pre-line; font-size: calc(14px * var(--fs)); line-height: 1.5; margin: 10px 0; padding: 10px 12px; background: var(--bg2); border-radius: 10px; }
+    #dlgTopics { display: flex; flex-direction: column; gap: 6px; }
+    .topic { width: 100%; min-height: 36px; text-align: left; padding: 6px 12px; height: auto; }
+    .topic:disabled { opacity: 0.55; cursor: default; background: transparent; color: var(--muted); border-color: var(--line); font-weight: 400; }
+    #storeBtn, #decoBtn { width: 100%; height: 40px; border: 0; border-radius: 10px; font-weight: 600; background: var(--hi); color: var(--on-hi); margin-bottom: 8px; }
+    #storePanel, #decoPanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
+    .groupHead { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 10px 12px; margin-top: 8px; border: 0.5px solid var(--line); border-radius: 8px; background: var(--bg2); color: var(--text); }
+    .groupHead.on { border-color: var(--accent); }
+    .padRow { display: flex; justify-content: center; gap: 8px; margin-top: 6px; }
+    .padRow .mini { min-width: 84px; height: 36px; }
+    .decoItem { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 8px 10px; margin-top: 6px; border: 0.5px solid var(--line); border-radius: 8px; background: transparent; color: var(--text); font-size: calc(13px * var(--fs)); }
+    .decoItem.on { border-color: var(--accent); background: var(--bg2); }
+    #decoPanel .mini:disabled, #storePanel .mini:disabled, #decoPanel .swatch:disabled { opacity: 0.55; cursor: default; }
+    #friendsPanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
+    #friendsPanel input { width: 100%; box-sizing: border-box; height: 40px; border-radius: 10px; border: 1px solid var(--line, #5a4b7a); background: var(--bg2); color: inherit; padding: 0 10px; font-size: 16px; }
+    #friendsPanel .inrow { display: flex; gap: 8px; margin: 6px 0; }
+    #friendsPanel .inrow input { flex: 1; width: auto; }
+    #dmBox { max-height: 34vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 6px 0; }
+    .dm { max-width: 80%; padding: 8px 10px; border-radius: 12px; font-size: calc(14px * var(--fs)); line-height: 1.35; overflow-wrap: anywhere; }
+    .dm.mine { align-self: flex-end; background: var(--hi); color: var(--on-hi); }
+    .dm.theirs { align-self: flex-start; background: var(--bg2); }
+    .dm.money { outline: 2px solid #3ddc97; }
+    #friendsBadge { margin-left: 6px; background: #ff4d4d; color: #fff; border-radius: 10px; padding: 0 6px; font-size: 12px; }
+    #wardrobeBtn[hidden] { display: none; }
+    #boutiquePanel, #wardrobePanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
+    #boutiquePanel .mini:disabled { opacity: 0.55; cursor: default; }
+    #boutiqueBtn, #wardrobeBtn { width: 100%; height: 40px; border: 0; border-radius: 10px; font-weight: 600; background: var(--hi); color: var(--on-hi); margin-bottom: 8px; }
+    #fpvBtn { position: fixed; right: 12px; top: 64px; z-index: 6; padding: 8px 12px; border: 0; border-radius: 18px; background: rgba(0,0,0,0.55); color: #fff; font: inherit; font-size: 13px; }
+    #installBtn { position: fixed; left: 12px; bottom: 12px; z-index: 30; padding: 10px 14px; border: 0; border-radius: 20px; background: var(--hi); color: var(--on-hi); font: inherit; font-weight: 700; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
+    #sitBtn { position: fixed; right: 12px; top: 104px; z-index: 6; padding: 8px 12px; border: 0; border-radius: 18px; background: rgba(0,0,0,0.55); color: #fff; font: inherit; font-size: 13px; }
+    body.seated #sitBtn { display: none !important; }
+    #seatBtn { position: fixed; right: 12px; top: 64px; z-index: 6; padding: 8px 12px; border: 0; border-radius: 18px; background: rgba(0,0,0,0.55); color: #fff; font: inherit; font-size: 13px; }
+    #seatBtn.on { background: #2e7d5b; }
+    #dash { display: none; position: fixed; left: 0; right: 0; bottom: 0; height: 15vh; pointer-events: none; z-index: 2; background: linear-gradient(to top, #111 0, #1c1c20 55%, rgba(28,28,32,0) 100%); border-top: 3px solid rgba(255,255,255,0.06); }
+    body.driverView #dash { display: block; }
+    #fpvBtn.on { background: #2e7d5b; }
+    #camBar { position: fixed; right: 12px; top: 12px; z-index: 6; display: flex; gap: 8px; }
+    #camBar button { width: 44px; height: 44px; border-radius: 22px; border: 0; font-size: 20px; background: rgba(0,0,0,0.55); color: #fff; }
+    #photoModal { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 12px; box-sizing: border-box; }
+    #photoModal[hidden] { display: none; }
+    #photoImg { max-width: 100%; max-height: 72vh; border-radius: 10px; }
+    #photoModal .row { display: flex; gap: 10px; }
+    #photoModal button { height: 42px; padding: 0 18px; border: 0; border-radius: 10px; font-weight: 600; background: var(--hi); color: var(--on-hi); }
+    #doorBtn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 96px; z-index: 6; height: 46px; padding: 0 22px; border: 0; border-radius: 23px; font-weight: 700; background: var(--hi); color: var(--on-hi); box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
+    #doorBtn[hidden] { display: none; }
+    #bankBtn { width: 100%; height: 40px; border: 0; border-radius: 10px; font-weight: 600; background: var(--hi); color: var(--on-hi); margin-bottom: 8px; }
+    #bankPanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
+    .bankPair { display: flex; gap: 8px; margin-top: 8px; }
+    .bankPair .mini { flex: 1; height: 36px; }
+    .bankPair .mini:disabled, #bankPanel .loanOffer .mini:disabled, #bankOpenBtn:disabled, #debtBtn:disabled { opacity: 0.55; cursor: default; background: transparent; color: var(--muted); border-color: var(--line); font-weight: 400; }
+    .bankSec { margin-top: 12px; padding-top: 10px; border-top: 0.5px solid var(--track); }
+    .loanBig { font-size: calc(18px * var(--fs)); font-weight: 700; margin: 4px 0; }
+    .loanOffer { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 0; border-top: 0.5px solid var(--track); }
+    .ledgerRow { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: calc(12px * var(--fs)); border-top: 0.5px solid var(--track); }
+    .ledgerKind { color: var(--muted); }
+    .ledgerAmt { white-space: nowrap; }
+    #bankQuick { margin-top: 6px; flex-wrap: wrap; }
+    .dest .tag.closed { color: var(--bad); }
+    .dest .sub2 { display: block; font-size: calc(11px * var(--fs)); color: var(--dim); }
+    @media (max-width: 600px) {
+      #hud { width: min(230px, calc(100vw - 24px)); padding: 8px 10px; font-size: calc(13px * var(--fs)); }
+      #hud .row { margin-bottom: 3px; }
+      #hudMore { display: block; }
+      #hud.compact .extra { display: none; }
+      #chip { top: auto; bottom: 70px; }
+      /* Panels become solid sheets above the info panel, never see-through on top of it. */
+      #map, #trainPanel, #finesPanel, #cityPanel, #bizPanel, #interviewPanel, #gamePanel, #billsPanel, #lookPanel, #skillsPanel, #jobsPanel, #peoplePanel, #carsPanel, #phonePanel, #bankPanel, #storePanel, #decoPanel, #boutiquePanel, #wardrobePanel, #friendsPanel, #sheet, #journal, #chatPanel { background: var(--bg); z-index: 8; left: 12px; right: 12px; width: auto; transform: none; top: auto; bottom: 70px; max-height: 68vh; overflow-y: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="hud" class="panel">
+    <div class="row extra"><span>Player</span><span id="player">-</span></div>
+    <div class="row"><span>Time</span><span id="clock">-</span></div>
+    <div class="row extra"><span>Location</span><span id="where">Plaza</span></div>
+    <div class="row"><span>Mood</span><span id="mood" class="pill Okay">Okay</span></div>
+    <div class="row"><span>Cash</span><span id="cash">₦5,000</span></div>
+    <div class="row extra"><span>Savings</span><span id="savings">-</span></div>
+    <div class="row" id="statusRow" hidden><span>Status</span><span id="status" class="pill Down"></span></div>
+    <div class="row extra"><span>Job</span><span id="job">None</span></div>
+    <div class="row extra"><span>Reputation</span><span id="repText">-</span></div>
+    <div class="row extra"><span>Players online</span><span id="online">1</span></div>
+    <div id="eventLine" hidden></div>
+    <div class="btnrow">
+      <button id="mapBtn">Map</button>
+      <button id="chatBtn">Chat<span id="chatBadge" hidden>0</span></button>
+      <button id="lookBtn">Look</button>
+      <button id="billsBtn">Bills<span id="billsBadge" hidden></span></button>
+      <button id="skillsBtn">Skills</button>
+      <button id="peopleBtn">People<span id="peopleBadge" hidden></span></button>
+      <button id="friendsBtn">Friends<span id="friendsBadge" hidden>0</span></button>
+    </div>
+    <button id="workBtn" hidden>Work a shift</button>
+    <button id="workBtn2" hidden>Work part-time</button>
+    <button id="jobsBtn" hidden>Jobs board</button>
+    <button id="carsBtn" hidden>Vehicles for sale</button>
+    <button id="phoneBtn" hidden>Phone store</button>
+    <button id="bankBtn" hidden>Open the Bank</button>
+    <button id="storeBtn" hidden>Furniture store</button>
+    <button id="decoBtn" hidden>Decorate my home</button>
+    <button id="boutiqueBtn" hidden>Boutique: clothes and perfume</button>
+    <button id="wardrobeBtn" hidden>Wardrobe</button>
+    <button id="medBtn" hidden>Buy medicine ₦3,000</button>
+    <button id="logout" class="extra">Log out</button>
+    <div id="notice">Tap the ground to walk.</div>
+    <div id="hint" class="extra">Drag to rotate. Scroll or pinch to zoom.</div>
+    <button id="hudMore">More ▾</button>
+  </div>
+
+  <div id="chip" class="panel" hidden><div><span id="chipTitle"></span><span id="chipBadge" hidden>1 message</span></div><div id="chipNext"></div></div>
+
+  <div id="journal" class="panel" hidden>
+    <div class="sheetHead"><span>Story</span><button id="journalClose" class="closeX" aria-label="Close story">×</button></div>
+    <div id="journalBody"></div>
+  </div>
+
+  <div id="backdrop" hidden></div>
+  <div id="modal" class="panel" hidden></div>
+  <div id="banner" class="panel" hidden></div>
+  <div id="chat" class="panel" hidden></div>
+
+  <div id="needsStrip" class="panel" title="Tap to open your needs"></div>
+
+  <div id="sheet" class="panel" hidden>
+    <div class="sheetHead">
+      <span>Your needs</span>
+      <span class="headRight"><span id="sheetMood" class="pill Okay">Okay</span><button id="sheetClose" class="closeX" aria-label="Close needs">×</button></span>
+    </div>
+    <div id="sheetBody"></div>
+    <div id="stressRow"><span class="nlabel">Stress</span><div class="nbar"><div id="stressFill" class="nfill"></div></div><span id="stressPct" class="npct">0%</span></div>
+    <div id="repRow" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:0.5px solid var(--track);"><span class="nlabel">Name</span><div class="nbar"><div id="repFill" class="nfill"></div></div><span id="repPct" class="npct" style="width:auto;min-width:60px;">-</span></div>
+    <div id="wellNote" class="sheetNote"></div>
+    <div class="sheetNote">Your name (reputation) goes up with tips, donations, finished quests, and paying bills on time. It drops if you steal, ghost a job, or swear in chat. Shady names cannot get hired or referred. Respected names earn more.</div>
+    <div class="sheetNote">Very low Energy slows your walking. Chat needs another player in the room.</div>
+  </div>
+
+  <button id="doorBtn" hidden></button>
+  <button id="fpvBtn" hidden>👁 First person</button>
+  <button id="installBtn" hidden>📲 Install app</button>
+  <button id="sitBtn" hidden>🪑 Sit</button>
+  <button id="seatBtn" hidden>🚗 Driver view</button>
+  <div id="dash"></div>
+  <div id="camBar"><button id="photoBtn" aria-label="Take a photo" title="Photo">📷</button><button id="selfieBtn" aria-label="Take a selfie" title="Selfie">🤳</button></div>
+  <div id="photoModal" hidden>
+    <img id="photoImg" alt="Your photo">
+    <div class="row"><button id="photoSave">Save</button><button id="photoShare" hidden>Share</button><button id="photoClose">Close</button></div>
+  </div>
+
+  <div id="friendsPanel" class="panel" hidden>
+    <div class="sheetHead"><span>Friends</span><button id="friendsClose" class="closeX" aria-label="Close friends">×</button></div>
+    <div id="friendsMain">
+      <div id="friendsPhone" class="skillName"></div>
+      <div class="fine">Only share your in-game number. Never post your real phone number.</div>
+      <div class="inrow"><input id="friendInput" placeholder="Username or phone number" maxlength="20" autocomplete="off"><button id="friendAddBtn" class="mini hot">Add</button></div>
+      <div id="friendsIncoming"></div>
+      <div class="jlabel">Your friends</div>
+      <div id="friendsList"></div>
+      <div id="friendsOut"></div>
+      <div id="friendsHere"></div>
+    </div>
+    <div id="friendsChat" hidden>
+      <div class="skillHead"><span id="chatWithName" class="skillName"></span><button id="dmBack" class="mini">Back</button></div>
+      <div id="dmBox"></div>
+      <div class="inrow"><input id="dmInput" placeholder="Message" maxlength="120" autocomplete="off"><button id="dmSendBtn" class="mini hot">Send</button></div>
+      <button id="dmPhoneBtn" class="mini">Share my phone number</button>
+      <div class="bankSec">
+        <div class="skillName">Send money</div>
+        <div id="moneyLimit" class="billWho"></div>
+        <div class="inrow"><input id="moneyInput" type="number" inputmode="numeric" placeholder="Amount in ₦" min="100"><button id="moneyBtn" class="mini hot">Send</button></div>
+      </div>
+      <div class="inrow"><button id="dmRemoveBtn" class="mini">Remove friend</button><button id="dmBlockBtn" class="mini">Block</button></div>
+    </div>
+  </div>
+
+  <div id="boutiquePanel" class="panel" hidden>
+    <div class="sheetHead"><span>Boutique</span><button id="boutiqueClose" class="closeX" aria-label="Close boutique">×</button></div>
+    <div id="boutiqueHere" class="modeWhy no" hidden>The Boutique is closed to you right now. Go there on the Map while it is open (10:00 to 20:00).</div>
+    <div id="boutiqueCount" class="billWho"></div>
+    <div id="boutiqueBody"></div>
+    <div class="bankSec"><div class="skillName">Yours</div><div id="boutiqueMine"></div></div>
+    <div class="fine">Clothes are mostly for looks. Only very expensive Designer and Couture pieces give a tiny charm bonus. A good perfume and outfit can earn compliments. The Boutique buys things back at half price.</div>
+  </div>
+
+  <div id="wardrobePanel" class="panel" hidden>
+    <div class="sheetHead"><span>Wardrobe</span><button id="wardClose" class="closeX" aria-label="Close wardrobe">×</button></div>
+    <div id="wardFit" class="skillName"></div>
+    <button id="wardShop" class="mini hot billPay" hidden>Shop for clothes and perfume (Boutique, via the Map)</button>
+    <div id="wardScent" class="billWho"></div>
+    <div id="wardList"></div>
+    <div class="bankSec"><div class="skillName">Perfume</div><div id="wardBottles"></div></div>
+    <div class="fine">Tap a piece to wear it. Tap it again to take it off. Other players can see what you wear.</div>
+  </div>
+
+  <div id="lookPanel" class="panel" hidden>
+    <div class="sheetHead"><span>Look</span><button id="lookClose" class="closeX" aria-label="Close look settings">×</button></div>
+    <div class="jlabel">Your character</div>
+    <div id="lookBody" class="swrow"><button class="pbtn" data-body="man" type="button">Man</button><button class="pbtn" data-body="woman" type="button">Woman</button></div>
+    <div class="jlabel">Style</div>
+    <div id="lookPresets" class="swrow"></div>
+    <div class="jlabel">Accent color</div>
+    <div id="lookAccents" class="swrow"></div>
+    <div class="jlabel">Text size</div>
+    <div id="lookSizes" class="swrow"></div>
+    <button id="lookReset" class="mini" style="margin-top:14px;">Reset to Sunset</button>
+    <div class="fine">Your look is saved to your account.</div>
+  </div>
+
+  <div id="peoplePanel" class="panel" hidden>
+    <div class="sheetHead"><span>People</span><button id="peopleClose" class="closeX" aria-label="Close people">×</button></div>
+    <div id="peopleMain">
+      <div class="jlabel">Here now</div>
+      <div id="peopleList"></div>
+      <div class="jlabel">Quests</div>
+      <div id="questList"></div>
+      <div class="fine">Chat about a topic near someone (like "market", "gym", "book") and they may share a tip. Get to know people: higher friendship unlocks quests and job referrals.</div>
+    </div>
+    <div id="dialog" hidden>
+      <div class="skillName" id="dlgName"></div>
+      <div class="billWho" id="dlgRole"></div>
+      <div class="nbar" style="margin-top:6px;"><div class="nfill" id="dlgFill"></div></div>
+      <div id="dlgLine"></div>
+      <div id="dlgTopics"></div>
+      <button id="dlgBack" class="mini" style="margin-top:10px;">Back</button>
+    </div>
+  </div>
+
+  <div id="phonePanel" class="panel" hidden>
+    <div class="sheetHead"><span>Phone store</span><button id="phoneClose" class="closeX" aria-label="Close phone store">×</button></div>
+    <div id="phoneBody"></div>
+    <div class="fine">Every phone can message and send money. Only phones with a camera can take Photos and Selfies.</div>
+  </div>
+
+  <div id="carsPanel" class="panel" hidden>
+    <div class="sheetHead"><span>Kanis Motors</span><button id="carsClose" class="closeX" aria-label="Close vehicles">×</button></div>
+    <div id="carsBody"></div>
+    <div class="fine">Vehicles appear on your Map as ways to travel. Rush Hour slows cars, but not bicycles.</div>
+  </div>
+
+  <div id="bankPanel" class="panel" hidden>
+    <div class="sheetHead"><span>Bank</span><button id="bankClose" class="closeX" aria-label="Close bank">×</button></div>
+    <div id="bankHere" class="modeWhy no" hidden>You are not at the Bank, so you can look but not change anything. Go to the Bank on the Map.</div>
+    <div class="skillHead"><span class="skillName">Savings</span><span id="bankSavings" class="tagc">-</span></div>
+    <div id="bankTier" class="billWho"></div>
+    <div class="skillHead" style="margin-top:10px;"><span class="skillName">Credit score</span><span id="bankScore" class="tagc">-</span></div>
+    <div class="nbar"><div class="nfill" id="bankScoreFill"></div></div>
+    <button id="bankOpenBtn" class="mini hot billPay" hidden>Open a free account</button>
+    <div id="bankMoney" hidden>
+      <input id="bankAmount" class="field" inputmode="numeric" placeholder="Amount in naira" maxlength="9" autocomplete="off" style="margin-top:10px;" />
+      <div id="bankQuick" class="swrow">
+        <button class="mini" data-amt="1000">1,000</button>
+        <button class="mini" data-amt="5000">5,000</button>
+        <button class="mini" data-amt="10000">10,000</button>
+        <button class="mini" data-amt="50000">50,000</button>
+      </div>
+      <div class="bankPair">
+        <button id="bankDepositBtn" class="mini hot">Deposit</button>
+        <button id="bankWithdrawBtn" class="mini">Withdraw</button>
+      </div>
+    </div>
+    <div id="bankInterest" class="fine"></div>
+    <div id="bankNext" class="fine" hidden></div>
+    <div id="loanBox" class="bankSec" hidden>
+      <div class="skillName">Loan</div>
+      <div id="loanActive" hidden>
+        <div id="loanOwed" class="loanBig"></div>
+        <div id="loanLeft" class="billWho"></div>
+        <div id="loanDue" class="billWhen"></div>
+        <div id="loanMissed" class="billNote" hidden></div>
+        <div class="bankPair">
+          <button id="loanInstBtn" class="mini hot">Pay</button>
+          <button id="loanPayoffBtn" class="mini">Pay off</button>
+        </div>
+        <div class="fine">The fee is flat, so paying early saves nothing. Paying on time builds your credit score.</div>
+      </div>
+      <div id="loanOffers" hidden><div id="loanOffersList"></div></div>
+    </div>
+    <div id="debtBox" class="bankSec" hidden>
+      <div class="skillName" style="color:var(--bad)">Debt</div>
+      <div id="debtText" class="billNote"></div>
+      <button id="debtBtn" class="mini hot billPay">Pay what I can</button>
+    </div>
+    <div class="bankSec">
+      <div class="skillName">Record</div>
+      <div id="ledgerList"></div>
+    </div>
+    <div class="fine">The bank is open 08:00 to 18:00. New accounts hold up to ₦100,000 and cannot borrow yet. Paying bills on time and repaying loans raises your credit score. Missing loan payments lowers it, and a default takes your savings.</div>
+  </div>
+
+  <div id="storePanel" class="panel" hidden>
+    <div class="sheetHead"><span>Catalogue</span><button id="storeClose" class="closeX" aria-label="Close store">×</button></div>
+    <div id="storeHere" class="modeWhy no" hidden>The store is closed to you right now. Go to the Home Store on the Map while it is open.</div>
+    <div id="storeCount" class="billWho"></div>
+    <div id="storeBody"></div>
+    <div class="bankSec"><div class="skillName">Your furniture</div><div id="storeMine"></div></div>
+    <div class="fine">Tap a category to see everything in it, from basic to luxury. Better pieces cost more and do more. Buy here, then place it in your Home. The store buys things back at half price. Open 09:00 to 19:00.</div>
+  </div>
+
+  <div id="decoPanel" class="panel" hidden>
+    <div class="sheetHead"><span>Decorate</span><button id="decoClose" class="closeX" aria-label="Close decorate">×</button></div>
+    <div id="decoHere" class="modeWhy no" hidden>Go to your Home to move things around.</div>
+    <div class="skillHead"><span id="decoStyle" class="skillName"></span></div>
+    <div id="decoEffects" class="billWho"></div>
+    <div class="bankSec"><div class="skillName">Your furniture</div><div id="decoList"></div></div>
+    <div id="decoMove" class="bankSec" hidden>
+      <div id="decoSelName" class="skillName"></div>
+      <button id="decoPlace" class="mini hot billPay">Place it in my home</button>
+      <div id="decoPad">
+        <div class="padRow"><button id="decoBack" class="mini">▲ Back</button></div>
+        <div class="padRow"><button id="decoLeft" class="mini">◀ Left</button><button id="decoTurn" class="mini">⟳ Turn</button><button id="decoRight" class="mini">Right ▶</button></div>
+        <div class="padRow"><button id="decoFront" class="mini">▼ Front</button></div>
+      </div>
+      <button id="decoAway" class="mini billPay">Put it away</button>
+    </div>
+    <div class="bankSec">
+      <div class="skillName">Paint</div>
+      <div class="billWho">Walls</div><div id="paintWalls" class="swrow"></div>
+      <div class="billWho" style="margin-top:6px;">Floor</div><div id="paintFloors" class="swrow"></div>
+      <div id="paintCost" class="fine"></div>
+    </div>
+    <div class="fine">Tap a piece, then use the buttons to move it one space at a time. Only placed furniture counts. Only the best bed, TV, fridge, desk and cooling count, so extras just look nice.</div>
+  </div>
+
+  <div id="skillsPanel" class="panel" hidden>
+    <div class="sheetHead"><span>Skills</span><button id="skillsClose" class="closeX" aria-label="Close skills">×</button></div>
+    <div id="skillsBody"></div>
+    <div class="fine">Study to level up. Higher levels unlock better jobs at the Jobs Center. Books are read at the Library, online courses need your Home with power and data, and practice happens at a place that fits the skill.</div>
+  </div>
+
+  <div id="shiftBar" hidden>
+    <div id="shiftText">Working…</div>
+    <div id="shiftTrack"><div id="shiftFill"></div></div>
+    <button id="shiftCancel" class="mini">Leave early (no pay)</button>
+  </div>
+
+  <div id="jobsPanel" class="panel" hidden>
+    <div class="sheetHead"><span>Jobs board</span><button id="jobsClose" class="closeX" aria-label="Close jobs">×</button></div>
+    <div id="jobsBody"></div>
+    <button id="quitJob" class="mini" style="margin-top:10px;" hidden>Quit my main job</button>
+    <button id="quitJob2" class="mini" style="margin-top:10px;" hidden>Quit my part-time job</button>
+  </div>
+
+  <div id="billsPanel" class="panel" hidden>
+    <div class="sheetHead"><span>Bills</span><button id="billsClose" class="closeX" aria-label="Close bills">×</button></div>
+    <div id="billsBody"></div>
+    <button id="bankViewBtn" class="mini" style="margin-top:10px;width:100%;">Savings, loans and credit score</button>
+    <div class="fine">Bills repeat every 7 game days (a game day is two real hours, so about 14 real hours). They only count down while you are online. You can pay once a bill is within 3 days of its due date. Paying late costs 10% extra.</div>
+  </div>
+
+  <div id="chatPanel" class="panel" hidden>
+    <div class="sheetHead">
+      <span id="chatTitle">Chat</span>
+      <span class="headRight"><button id="mutedBtn" class="mini">Muted (0)</button><button id="chatClose" class="closeX" aria-label="Close chat">×</button></span>
+    </div>
+    <div id="chatList"></div>
+    <div id="chatForm">
+      <input id="chatInput" maxlength="120" placeholder="Say something" autocomplete="off" />
+      <button id="chatSend" class="mini hot">Send</button>
+    </div>
+    <div class="fine">Be kind. Links and phone numbers are blocked. Tap ⋯ on a message to report or mute.</div>
+  </div>
+
+  <div id="map" class="panel" hidden>
+    <div class="mapHead"><span>Map</span><button id="mapClose" class="closeX" aria-label="Close map">×</button></div>
+    <div id="mapBody"></div>
+  </div>
+
+  <div id="trainPanel" class="panel" hidden>
+    <div class="mapHead"><span>Express train</span><button id="trainClose" class="closeX" aria-label="Close">×</button></div>
+    <div id="trainBody"></div>
+  </div>
+  <div id="finesPanel" class="panel" hidden>
+    <div class="mapHead"><span>Police fines</span><button id="finesClose" class="closeX" aria-label="Close">×</button></div>
+    <div id="finesBody"></div>
+  </div>
+  <button id="stealBtn" class="floatBtn" hidden>🫳 Steal</button>
+  <button id="finesBtn" class="floatBtn" hidden>🚓 Fines</button>
+  <div id="jailBanner" hidden></div>
+  <div id="knockBox" hidden></div>
+  <button id="driveBtn" class="floatBtn" hidden>🚗 Drive</button>
+  <button id="parkBtn" class="floatBtn" hidden>🅿️ Park</button>
+  <div id="speedo" hidden></div>
+  <div id="wantedBanner" hidden></div>
+  <div id="joy" hidden><div id="joyKnob"></div></div>
+  <div id="cityPanel" class="panel" hidden>
+    <div class="mapHead"><span>Travel to another city</span><button id="cityClose" class="closeX" aria-label="Close">×</button></div>
+    <div id="cityBody"></div>
+  </div>
+  <div id="fade"></div>
+  <div id="cabinHint" hidden>💺 You are in your seat · drag to look around</div>
+  <div id="interviewPanel" class="panel" hidden>
+    <div class="mapHead"><span>Job interview</span><button id="interviewClose" class="closeX" aria-label="Close">×</button></div>
+    <div id="interviewBody"></div>
+  </div>
+  <div id="gamePanel" class="panel" hidden>
+    <div class="mapHead"><span id="gameTitle">Games</span><button id="gameClose" class="closeX" aria-label="Close">×</button></div>
+    <div id="gameBody"></div>
+  </div>
+  <button id="gameBtn" hidden>🎮 Play</button>
+  <div id="bizPanel" class="panel" hidden>
+    <div class="mapHead"><span>Property</span><button id="bizClose" class="closeX" aria-label="Close">×</button></div>
+    <div id="bizBody"></div>
+  </div>
+  <button id="bizBtn" hidden>🏪 Property</button>
+  <button id="cityBtn" hidden>🌍 Tickets to other cities</button>
+  <button id="trainBtn" hidden>🚆 Express train</button>
+
+  <div id="trip" class="panel" hidden>
+    <div id="tripText">Traveling…</div>
+    <div class="tbar"><div id="tripFill"></div></div>
+    <button id="skipRide" class="btn" hidden>Skip ride</button>
+  </div>
+
+  <div id="auth" class="panel" hidden>
+    <div id="logoAuth" class="brand"></div>
+    <div class="sub">Log in, or create an account</div>
+    <div class="jlabel" style="margin-top:6px">New here? Choose your character</div>
+    <div class="swrow" id="authBody"><button class="pbtn on" data-body="man" type="button">Man</button><button class="pbtn" data-body="woman" type="button">Woman</button></div>
+    <input id="user" class="field" placeholder="Username" autocomplete="username" maxlength="16" />
+    <input id="pass" class="field" type="password" placeholder="Password (8 or more characters)" autocomplete="current-password" maxlength="100" />
+    <div id="authError" class="err"></div>
+    <button id="login" class="big">Log in</button>
+    <button id="signup" class="alt">Create account</button>
+    <button id="forgot" class="link">Forgot password?</button>
+  </div>
+
+  <div id="reset" class="panel" hidden>
+    <div class="logo">RESET PASSWORD</div>
+    <div class="sub">Enter your username, your recovery code, and a new password</div>
+    <input id="ruser" class="field" placeholder="Username" autocomplete="username" maxlength="16" />
+    <input id="rcode" class="field" placeholder="Recovery code (XXXX-XXXX-XXXX-XXXX)" autocomplete="off" maxlength="40" />
+    <input id="rpass" class="field" type="password" placeholder="New password (8 or more characters)" autocomplete="new-password" maxlength="100" />
+    <div id="resetError" class="err"></div>
+    <button id="resetGo" class="big">Reset password</button>
+    <button id="resetBack" class="link">Back to log in</button>
+  </div>
+
+  <div id="recovery" class="panel" hidden>
+    <div id="recTitle" class="logo" style="font-size:18px;">Save your recovery code</div>
+    <div id="codeText"></div>
+    <div id="recMsg"></div>
+    <button id="copyCode" class="alt" style="margin-top:12px;">Copy code</button>
+    <button id="recContinue" class="big">I saved it, continue</button>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

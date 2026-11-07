@@ -1,0 +1,11 @@
+{
+  "note": "Words and phrases hidden in chat. Lowercase, one per line in the list. Add the rude words people use in your community. Matching is by whole word.",
+  "words": [
+    "idiot",
+   "stupid", 
+   "fool", 
+   "dumb",
+    "loser", 
+    "shut up"
+]
+}

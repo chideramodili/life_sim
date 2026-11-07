@@ -1,0 +1,169 @@
+{
+  "id": 1,
+  "title": "Chapter 1: Find work",
+  "premise": "Rent is due soon and your savings are thin.",
+  "objectives": [
+    { "id": "visit_jobs", "text": "Visit the Jobs Center" },
+    { "id": "apply", "text": "Apply for a job" },
+    { "id": "interview", "text": "Attend the interview" }
+  ],
+  "recap": {
+    "Promised rent on time": "You promised Mr. Sule the rent on time.",
+    "Asked landlord for more time": "You asked Mr. Sule for more time.",
+    "Wants quick cash": "You went for quick cash.",
+    "Wants a long-term job": "You are looking for a job with a future.",
+    "Shared food with Mama Tunde": "You shared your food with Mama Tunde.",
+    "Fixed the fuse": "You fixed the fuse for Mama Tunde.",
+    "Stayed inside during the power cut": "You stayed inside during the power cut."
+  },
+  "beats": [
+    {
+      "id": "start",
+      "type": "card",
+      "title": "Chapter 1: Find work",
+      "text": "Rent is due soon and your savings are thin."
+    },
+    {
+      "id": "rent",
+      "type": "message",
+      "who": "Mr. Sule",
+      "text": "Good afternoon. Your rent is due in 7 days. Will it be ready?",
+      "when": { "after": "start", "delay": 20 },
+      "choices": [
+        { "label": "I'll pay on time", "reply": "Good. I'll expect it on Sunday.", "effects": { "flags": ["Promised rent on time"] } },
+        { "label": "Can I have more time?", "reply": "Three more days. No longer.", "effects": { "flags": ["Asked landlord for more time"] } }
+      ]
+    },
+    {
+      "id": "jobs_visit",
+      "type": "message",
+      "who": "Mr. Bello",
+      "text": "Welcome in. What kind of work are you looking for?",
+      "when": { "after": "start", "visit": "jobs" },
+      "choices": [
+        { "label": "Anything that pays this week", "reply": "Shop and delivery jobs open every day. The shop is hiring now.", "effects": { "flags": ["Wants quick cash"], "objectives": ["visit_jobs"] } },
+        { "label": "Something with a future", "reply": "Office jobs need more skill. The shop is a good first step.", "effects": { "flags": ["Wants a long-term job"], "objectives": ["visit_jobs"] } },
+        { "label": "I'm not sure yet", "reply": "Let's see what you can do today. The shop is hiring.", "effects": { "objectives": ["visit_jobs"] } }
+      ]
+    },
+    {
+      "id": "apply",
+      "type": "message",
+      "who": "Mr. Bello",
+      "text": "The shop assistant job pays ₦8,000 a shift. Want me to put your name down?",
+      "when": { "after": "jobs_visit", "delay": 3, "visit": "jobs", "cooldown": 20 },
+      "choices": [
+        { "label": "Yes, apply for me", "reply": "Done. Mrs. Okafor will interview you at the Shop.", "effects": { "flags": ["Applied"], "objectives": ["apply"] } },
+        { "label": "Maybe later", "reply": "No rush. Ask me again when you're ready.", "retry": true }
+      ]
+    },
+    {
+      "id": "okafor",
+      "type": "message",
+      "who": "Mrs. Okafor",
+      "text": "Thanks for applying. Please come to the Shop for your interview.",
+      "when": { "after": "apply", "delay": 5 },
+      "choices": [
+        { "label": "I'll be there", "reply": "Good. Please be on time." }
+      ]
+    },
+    {
+      "id": "powercut",
+      "type": "event",
+      "title": "Power cut",
+      "text": "The lights go out while you cook. Your neighbor, Mama Tunde, knocks on your door with a candle.",
+      "when": { "after": "okafor", "delay": 40, "forbids": ["Interview started"] },
+      "choices": [
+        { "label": "Share your food", "result": "Mama Tunde smiles and says she won't forget it.", "effects": { "needs": { "food": -20, "social": 15 }, "flags": ["Shared food with Mama Tunde"] } },
+        { "label": "Stay inside", "result": "You wait in the dark until the lights return.", "effects": { "needs": { "social": -5 }, "flags": ["Stayed inside during the power cut"] } },
+        { "label": "Help fix the fuse", "result": "It takes a while, but the lights come back. She tips you.", "effects": { "cash": 2000, "flags": ["Fixed the fuse"] } }
+      ]
+    },
+    {
+      "id": "jacket",
+      "type": "message",
+      "who": "Mama Tunde",
+      "text": "I heard you have an interview. Take this smart jacket.",
+      "when": { "after": "powercut", "delay": 3, "requires": ["Shared food with Mama Tunde"], "forbids": ["Interview started"] },
+      "choices": [
+        { "label": "Thank you, Mama", "reply": "Go and make us proud.", "effects": { "score": 1, "flags": ["Borrowed a smart jacket"] } }
+      ]
+    },
+    {
+      "id": "interview_q1",
+      "type": "message",
+      "who": "Mrs. Okafor",
+      "text": "Good morning. Let's begin. Why do you want this job?",
+      "when": { "visit": "shop", "requires": ["Applied"] },
+      "choices": [
+        { "label": "I need the money", "reply": "Honest. Fair enough.", "effects": { "score": 1, "flags": ["Interview started"], "objectives": ["interview"] } },
+        { "label": "I like working with people", "reply": "Good. That helps here.", "effects": { "score": 2, "flags": ["Interview started"], "objectives": ["interview"] } },
+        { "label": "I'm not sure", "reply": "Hm. Let's continue.", "effects": { "flags": ["Interview started"], "objectives": ["interview"] } }
+      ]
+    },
+    {
+      "id": "interview_q2",
+      "type": "message",
+      "who": "Mrs. Okafor",
+      "text": "A customer is rude to you. What do you do?",
+      "when": { "after": "interview_q1", "delay": 2 },
+      "choices": [
+        { "label": "Stay calm and apologize", "reply": "Good answer.", "effects": { "score": 2 } },
+        { "label": "Call the manager", "reply": "Reasonable.", "effects": { "score": 1 } },
+        { "label": "Ignore them", "reply": "Hm.", "effects": {} }
+      ]
+    },
+    {
+      "id": "interview_q3",
+      "type": "message",
+      "who": "Mrs. Okafor",
+      "text": "Last one. Can you start on Monday?",
+      "when": { "after": "interview_q2", "delay": 2 },
+      "choices": [
+        { "label": "Yes", "reply": "Noted.", "effects": { "score": 2 } },
+        { "label": "Only afternoons", "reply": "Noted.", "effects": { "score": 1 } },
+        { "label": "I need to think", "reply": "Noted.", "effects": {} }
+      ]
+    },
+    {
+      "id": "offer",
+      "type": "message",
+      "who": "Mrs. Okafor",
+      "text": "You're hired. The job pays ₦8,000 a shift. Welcome to the team.",
+      "when": { "after": "interview_q3", "delay": 3, "scoreMin": 5 },
+      "choices": [
+        { "label": "Thank you", "reply": "See you on Monday.", "effects": { "flags": ["Interview result: offer"] } }
+      ]
+    },
+    {
+      "id": "trial",
+      "type": "message",
+      "who": "Mrs. Okafor",
+      "text": "We'll start you on a trial week at ₦6,000 a shift, then review.",
+      "when": { "after": "interview_q3", "delay": 3, "scoreMin": 3, "scoreMax": 4 },
+      "choices": [
+        { "label": "Thank you", "reply": "See you on Monday.", "effects": { "flags": ["Interview result: trial week"] } }
+      ]
+    },
+    {
+      "id": "declined",
+      "type": "message",
+      "who": "Mr. Bello",
+      "text": "I heard it did not go well this time. The delivery rider job is open. Want it?",
+      "when": { "after": "interview_q3", "delay": 3, "scoreMax": 2 },
+      "choices": [
+        { "label": "Yes, thank you", "reply": "Good. You start on Monday.", "effects": { "flags": ["Interview result: not this time", "Took the delivery job"] } }
+      ]
+    },
+    {
+      "id": "end",
+      "type": "card",
+      "title": "Chapter 1 complete: Find work",
+      "text": "You have a job, and the rent is closer to being paid.",
+      "recap": true,
+      "reward": { "cash": 5000 },
+      "finish": true,
+      "when": { "afterAny": ["offer", "trial", "declined"], "delay": 3 }
+    }
+  ]
+}
