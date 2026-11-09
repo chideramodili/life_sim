@@ -359,3 +359,18 @@ export function homeInfo(home, where) {
     floors: Object.entries(FLOORS).map(([id, color]) => ({ id, color })),
   };
 }
+
+// Walking boxes [x0, z0, x1, z1] for the furniture you have placed: you cannot walk through a bed or a sofa. Rugs are flat, so they are walkable.
+// The strip next to the front door stays clear so nobody can get shut in.
+export function homeSolids(home) {
+  const out = [];
+  if (!home || !Array.isArray(home.items)) return out;
+  for (const o of home.items) {
+    if (!o.placed || !CATALOG[o.id] || CATALOG[o.id].flat) continue;
+    const [w, d] = footprint(o.id, o.rot);
+    const z1 = Math.min(o.z + d, 8.4);
+    if (z1 <= o.z) continue;
+    out.push([o.x + 0.04, o.z + 0.04, o.x + w - 0.04, z1 - 0.04]);
+  }
+  return out;
+}

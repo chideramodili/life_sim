@@ -5,6 +5,7 @@ export const OFFENCES = {
   redlight: { label: 'Running a red light', fine: 3000, rep: -5, jailSec: 60 },
   hitrun: { label: 'Hit and run', fine: 8000, rep: -15, jailSec: 90 },
   evading: { label: 'Evading police', fine: 5000, rep: -8, jailSec: 90 },
+  speeding: { label: 'Speeding', fine: 2500, rep: -3, jailSec: 45 },
 };
 export const STEAL = { min: 1500, max: 4000, catchChance: 0.35, cooldownMs: 20000 };
 export const GRACE_DAYS = 1;             // a fine can be paid at face value for one game day
@@ -89,3 +90,16 @@ export function stealOutcome(rand, repScore = 0) {
 }
 
 export const wantedByPolice = (fines, gameMin) => overdueTotal(fines, gameMin) >= ARREST_AT;
+
+// Street policing: patrol cars drive the roads and checkpoints stand on the main road.
+export const SPEED_LIMIT = Number(process.env.SPEED_LIMIT) || 16;           // m/s (about 58 km/h); faster than this near police is speeding
+export const PATROL_SEE = 16;            // a patrol car sees speeders this close (m)
+export const CHECK_REACH = 7;            // a checkpoint stops drivers this close (m)
+export const CHECK_CHANCE = 0.6;         // chance a passing driver is checked
+export const CHECK_COOLDOWN_MS = 45000;
+// Where the checkpoints are: two on the first east-west road. The browser uses the same rule to draw them.
+export const checkpointsOf = (city) => {
+  const rw = city.roadsEW[0];
+  const x = Math.round(city.bx * 0.42);
+  return [-x, x].map((cx, i) => ({ i, x: cx, z: rw.z, half: rw.half }));
+};

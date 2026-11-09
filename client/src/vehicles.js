@@ -1,5 +1,6 @@
 // Simple code-made vehicles for rides. They face +Z, so a heading of atan2(dx, dz) points them along the road.
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const mat = (c, o = {}) => new THREE.MeshLambertMaterial({ color: c, ...o });
 const box = (w, h, d, m, x, y, z) => {
@@ -26,7 +27,7 @@ function lights(g, w, front, back, y) {
   }
 }
 
-export function makeVehicle(kind) {
+function makeBoxVehicle(kind) {
   const g = new THREE.Group();
   if (kind === 'bus') {
     // a yellow minibus with a black stripe, like the ones that fill the streets
@@ -85,4 +86,86 @@ export function makeVehicle(kind) {
     g.add(rider);
   }
   return g;
+}
+
+// ---------- Real car models (client/public/models/cars/<name>.glb) ----------
+// Every model faces +Z, stands on the ground and is in metres. To add a car: put the .glb there and add a row in server/social.js.
+const loaded = {}, loading = {};
+export function loadCar(name) {
+  if (loading[name]) return loading[name];
+  loading[name] = new GLTFLoader().loadAsync(`/models/cars/${name}.glb`).then((g) => { loaded[name] = g.scene; return g.scene; }).catch(() => null);
+  return loading[name];
+}
+export const carReady = (name) => Boolean(loaded[name]);
+// A fresh copy of a loaded model (shares the geometry and textures, so copies are cheap). Wheels are found for spinning.
+export function carClone(name) {
+  const src = loaded[name];
+  if (!src) return null;
+  const c = src.clone(true);
+  const wheels = [];
+  c.traverse((o) => { if (/wheel/.test(o.name) && !/steer/.test(o.name)) { wheels.push({ o, sign: new THREE.Vector3(1, 0, 0).applyQuaternion(o.quaternion).x < 0 ? -1 : 1 }); } });
+  if (/cockpit/.test(name)) c.traverse((o) => { if (/glass/.test(o.name)) o.visible = false; }); // you look out through the open frame
+  c.userData.wheels = wheels;
+  return c;
+}
+// Spin the wheels for a distance driven (metres).
+export function spinWheels(g, dist) {
+  const w = g.userData.wheels;
+  if (!w) return;
+  for (const { o, sign } of w) o.rotateX(sign * dist / 0.34);
+}
+// Which models appear in street traffic. Old yellow cabs are listed more than once, so they are a common sight.
+export const TRAFFIC_MODELS = ['coupe70', 'taxi90', 'pickup50', 'taxi90', 'roadster50', 'lowrider', 'coupe70', 'taxi90', 'taxi'];
+
+// A vehicle for someone else (or a patrol): a real model when we have one, with the plain box version until it loads.
+export function makeVehicle(kind, model) {
+  const g = makeBoxVehicle(kind);
+  const name = model || (kind === 'police' ? 'police' : kind === 'taxi' ? 'taxi' : null);
+  if (!name) return g;
+  const swap = () => {
+    const c = carClone(name);
+    if (!c) return;
+    for (const ch of g.children.slice()) g.remove(ch);
+    g.add(c);
+    g.userData.wheels = c.userData.wheels;
+    g.userData.model = name;
+    if (kind === 'police') {
+      // flashing roof lights
+      const red = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.25), new THREE.MeshBasicMaterial({ color: 0xff2020 }));
+      const blue = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.12, 0.25), new THREE.MeshBasicMaterial({ color: 0x2040ff }));
+      red.position.set(0.28, 1.68, -0.1); blue.position.set(-0.28, 1.68, -0.1);
+      g.add(red, blue);
+      g.userData.lights = [red, blue];
+    } else g.userData.lights = undefined;
+  };
+  if (carReady(name)) swap(); else loadCar(name).then(swap);
+  return g;
+}
+
+// A small picture of a car for the Kanis Motors catalogue, drawn once off screen. '' until the model has loaded.
+const thumbCache = new Map();
+let tRen = null, tScene = null, tCam = null;
+export function carThumb(name) {
+  if (thumbCache.has(name)) return thumbCache.get(name);
+  const c = carClone(name);
+  if (!c) return '';
+  let url = '';
+  try {
+    if (!tRen) {
+      tRen = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+      tRen.setPixelRatio(1); tRen.setSize(240, 120); tRen.setClearColor(0x000000, 0);
+      tScene = new THREE.Scene();
+      tScene.add(new THREE.HemisphereLight(0xffffff, 0x8a8aa0, 1.9));
+      const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(4, 6, 5); tScene.add(sun);
+      tCam = new THREE.PerspectiveCamera(28, 240 / 120, 0.1, 100);
+    }
+    c.rotation.y = 0.6;
+    tScene.add(c);
+    tCam.position.set(-3.6, 2.3, 7.6); tCam.lookAt(0, 0.65, 0);
+    tRen.render(tScene, tCam);
+    url = tRen.domElement.toDataURL('image/png');
+    tScene.remove(c);
+  } catch { url = ''; }
+  thumbCache.set(name, url);
+  return url;
 }

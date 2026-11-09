@@ -16,7 +16,7 @@ import { createTraffic } from './traffic.js';
 import { trafficLevel } from './world.js';
 import { phaseAt, stateOf, junctionAt, axisOfHeading } from './signals.js';
 import { VEH, newDrive, stepSpeed, moveDrive, POLICE, newChase, chaseTick, lineOfSight } from './driving.js';
-import { OFFENCES, STEAL, ARREST_JAIL_SEC, PATROL_EVERY_MS, PATROL_CHANCE, cleanFines, newFine, fineView, totalDue, overdueTotal, payFine, payOldestFirst, stealOutcome, wantedByPolice } from './police.js';
+import { SPEED_LIMIT, PATROL_SEE, CHECK_REACH, CHECK_CHANCE, CHECK_COOLDOWN_MS, checkpointsOf, OFFENCES, STEAL, ARREST_JAIL_SEC, PATROL_EVERY_MS, PATROL_CHANCE, cleanFines, newFine, fineView, totalDue, overdueTotal, payFine, payOldestFirst, stealOutcome, wantedByPolice } from './police.js';
 import { getCity, CITY, DOOR_REACH, routeBetween, pointOnRoute } from './city.js';
 import { speedFor, slide, findPath, roomBlockedFn, roomSolids } from './movement.js';
 import { MOVE_FEE, CITIES, CITY_IDS, DEFAULT_CITY, isCity, parseCity, TICKETS, TICKET_IDS, ticketQuote, distanceBetween, HIGHWAY, neighbour, gateAt, arrivalFrom } from './cities.js';
@@ -47,7 +47,7 @@ import {
   parseWardrobe, wardrobeInfo, fashionCatalog, publicLook, charmBonus, compliment, COMPLIMENT_COOLDOWN_MS, outfitOf, scentOf,
   buyClothes, sellClothes, wear, takeOff, buyPerfume, sellPerfume, spritz, tickScent,
 } from './fashion.js';
-import { parseHome, homeInfo, effectsOf, buyItem, sellItem, placeItem, putAway, paint, setLights } from './home.js';
+import { homeSolids, parseHome, homeInfo, effectsOf, buyItem, sellItem, placeItem, putAway, paint, setLights } from './home.js';
 
 // ---------- Settings ----------
 const PORT = process.env.PORT || 3001;
@@ -125,7 +125,7 @@ const HOME = 'home';
 const CITY_CTX = {};
 for (const id of CITY_IDS) {
   const g = getCity(CITIES[id].seed);
-  CITY_CTX[id] = { id, def: CITIES[id], layout: g.city, walls: g.walls, traffic: createTraffic(g.city, g.walls.blocked, { brake: process.env.TRAFFIC_NO_BRAKE !== '1' }) };
+  CITY_CTX[id] = { id, def: CITIES[id], layout: g.city, walls: g.walls, checkpoints: checkpointsOf(g.city), traffic: createTraffic(g.city, g.walls.blocked, { brake: process.env.TRAFFIC_NO_BRAKE !== '1' }) };
 }
 const LAGOS = CITY_CTX[DEFAULT_CITY];
 const ctxOf = (p) => CITY_CTX[p.city] || LAGOS;
@@ -173,6 +173,8 @@ const NO_POWER_SHOWER_GAIN = 15;
 
 export const EYE_IDS = ['brown', 'hazel', 'green', 'blue', 'grey', 'amber'];
 export const HAIR_IDS = ['brown', 'black', 'chestnut', 'auburn', 'ginger', 'blonde', 'grey', 'white'];
+export const STYLE_IDS = ['original', 'bald', 'buzz', 'low', 'curls', 'afro', 'cornrows', 'braids', 'locs', 'knots', 'bun', 'ponytail', 'puffs'];
+export const FACE_N = 7;   // face sliders (nose width/length, lips, mouth width, jaw, chin, face width), each -3..3
 export const SKIN_COUNT = 12;   // 0 is the model's own tone, then lighter to darker tints
 const cleanLook = (v, cur) => {
   const o = v && typeof v === 'object' ? v : {};
@@ -181,6 +183,8 @@ const cleanLook = (v, cur) => {
     eyes: EYE_IDS.includes(o.eyes) ? o.eyes : cur.eyes,
     skin: Number.isInteger(o.skin) && o.skin >= 0 && o.skin < SKIN_COUNT ? o.skin : cur.skin,
     hair: HAIR_IDS.includes(o.hair) ? o.hair : cur.hair,
+    style: STYLE_IDS.includes(o.style) ? o.style : cur.style || 'original',
+    face: Array.isArray(o.face) && o.face.length === FACE_N && o.face.every((n) => Number.isInteger(n) && n >= -3 && n <= 3) ? o.face : (Array.isArray(cur.face) ? cur.face : new Array(FACE_N).fill(0)),
   };
 };
 // A player's look. Only these values are accepted, so nobody can store anything else.
@@ -331,6 +335,12 @@ const addColumn = (name, ddl) => {
 };
 for (const n of ['energy', 'fun', 'social', 'clean', 'toilet']) addColumn(n, 'INTEGER NOT NULL DEFAULT 70');
 addColumn('recovery_hash', 'TEXT');
+addColumn('email', 'TEXT');             // verified email (password reset by email)
+addColumn('mail_code', 'TEXT');         // sha256 of the 6-digit code we emailed
+addColumn('mail_exp', 'INTEGER');       // when that code stops working (ms)
+addColumn('mail_kind', 'TEXT');         // 'verify:<address>' or 'reset'
+addColumn('mail_tries', 'INTEGER');
+addColumn('mail_sent', 'INTEGER');      // last send time (ms), to slow down spam
 addColumn('story', 'TEXT');
 addColumn('last_work', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('theme', 'TEXT');
@@ -354,8 +364,11 @@ addColumn('wardrobe', 'TEXT');
 addColumn('body', "TEXT NOT NULL DEFAULT 'man'");
 addColumn('eyes', "TEXT NOT NULL DEFAULT 'brown'");
 addColumn('skin', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('style', "TEXT NOT NULL DEFAULT 'original'");
 addColumn('hair', "TEXT NOT NULL DEFAULT 'brown'");
 addColumn('phone', 'TEXT');
+addColumn('face', 'TEXT');
+addColumn('look_done', 'INTEGER NOT NULL DEFAULT 1');   // 0 until a new account has made its character
 addColumn('start_min', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('fines', 'TEXT');
 addColumn('jail_until', 'INTEGER NOT NULL DEFAULT 0');
@@ -372,7 +385,8 @@ const q = {
   userById: db.prepare('SELECT * FROM users WHERE id = ?'),
   setBody: db.prepare('UPDATE users SET body = ? WHERE id = ?'),
   setEyes: db.prepare('UPDATE users SET eyes = ? WHERE id = ?'),
-  setLook: db.prepare('UPDATE users SET body = ?, eyes = ?, skin = ?, hair = ? WHERE id = ?'),
+  lookDone: db.prepare('UPDATE users SET look_done = 1 WHERE id = ?'),
+  setLook: db.prepare('UPDATE users SET body = ?, eyes = ?, skin = ?, hair = ?, style = ?, face = ? WHERE id = ?'),
   insertUser: db.prepare('INSERT INTO users (username, pass_hash, recovery_hash, cash, food, room, created_at, last_seen, phone, start_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   saveUser: db.prepare('UPDATE users SET cash = ?, food = ?, energy = ?, fun = ?, social = ?, clean = ?, toilet = ?, room = ?, story = ?, last_work = ?, bills = ?, skills = ?, job_id = ?, job2_id = ?, last_work2 = ?, handsets = ?, city = ?, home_city = ?, stress = ?, sick = ?, burnout = ?, vehicles = ?, net = ?, rep = ?, bank = ?, home = ?, wardrobe = ?, fines = ?, jail_until = ?, last_seen = ? WHERE id = ?'),
   addLedger: db.prepare('INSERT INTO ledger (user_id, kind, bal, cash, bal_after, cash_after, note, game_min, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
@@ -535,7 +549,8 @@ app.post('/api/signup', async (req, res) => {
     } catch {
       return res.status(409).json({ error: 'That username is taken.' });
     }
-    { const l = cleanLook(req.body, { body: req.body.body === 'woman' ? 'woman' : 'man', eyes: 'brown', skin: 0, hair: 'brown' }); q.setLook.run(l.body, l.eyes, l.skin, l.hair, id); }
+    { const l = cleanLook(req.body, { body: req.body.body === 'woman' ? 'woman' : 'man', eyes: 'brown', skin: 0, hair: 'brown', style: 'original' }); q.setLook.run(l.body, l.eyes, l.skin, l.hair, l.style, JSON.stringify(l.face), id); if (req.body.body === undefined) db.prepare('UPDATE users SET look_done = 0 WHERE id = ?').run(id); }   // the game client sends no look: the editor opens after sign-up
+
     res.status(201).json({ token: newSession(id), username, recoveryCode });
   } catch (err) {
     console.error('signup failed', err);
@@ -612,6 +627,109 @@ app.post('/api/reset', async (req, res) => {
     console.error('reset failed', err);
     res.status(500).json({ error: 'Something went wrong. Try again.' });
   }
+});
+
+// ---------- Email (password reset) ----------
+// $0 setup: create a free Brevo account, verify your sender email there, then start the server with
+//   BREVO_API_KEY=xkeysib-...   MAIL_FROM=you@gmail.com
+// Without those, emails are printed in the server window instead (fine for testing on your laptop).
+const MAIL_FROM = process.env.MAIL_FROM || '';
+async function sendMail(to, subject, text) {
+  if (process.env.BREVO_API_KEY && MAIL_FROM) {
+    try {
+      const r = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: { 'api-key': process.env.BREVO_API_KEY, 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ sender: { name: 'Adulthood', email: MAIL_FROM }, to: [{ email: to }], subject, textContent: text }),
+      });
+      if (!r.ok) console.error('mail failed', r.status, await r.text().catch(() => ''));
+      return r.ok;
+    } catch (e) { console.error('mail failed', e.message); return false; }
+  }
+  console.log(`[mail] to=${to} subject="${subject}" ${text.replace(/\s+/g, ' ')}`);
+  return true;
+}
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
+const MAIL_COOLDOWN_MS = 60 * 1000, MAIL_CODE_MS = 15 * 60 * 1000;
+const sixDigits = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+const mailQ = {
+  setCode: db.prepare('UPDATE users SET mail_code = ?, mail_exp = ?, mail_kind = ?, mail_tries = 0, mail_sent = ? WHERE id = ?'),
+  clearCode: db.prepare('UPDATE users SET mail_code = NULL, mail_exp = NULL, mail_kind = NULL, mail_tries = 0 WHERE id = ?'),
+  tries: db.prepare('UPDATE users SET mail_tries = mail_tries + 1 WHERE id = ?'),
+  setEmail: db.prepare('UPDATE users SET email = ? WHERE id = ?'),
+  byEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
+};
+// Only a code that matches, is not expired, and has fewer than 5 wrong guesses works. Returns true once.
+function mailCodeOk(user, code, kind) {
+  if (!user || typeof code !== 'string' || !/^\d{6}$/.test(code)) return false;
+  if (!user.mail_code || !user.mail_kind || !user.mail_kind.startsWith(kind) || Date.now() > (user.mail_exp || 0) || (user.mail_tries || 0) >= 5) return false;
+  if (sha256(code) !== user.mail_code) { mailQ.tries.run(user.id); return false; }
+  return true;
+}
+
+// Add or change the email on your account (logged in). We email a 6-digit code to confirm the address is yours.
+app.post('/api/email/add', async (req, res) => {
+  try {
+    const user = userFromToken(bearer(req));
+    if (!user) return res.status(401).json({ error: 'Not logged in.' });
+    const email = typeof (req.body || {}).email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    if (!EMAIL_RE.test(email) || email.length > 254) return res.status(400).json({ error: 'That does not look like an email address.' });
+    if (Date.now() - (user.mail_sent || 0) < MAIL_COOLDOWN_MS) return res.status(429).json({ error: 'Wait a minute before asking for another code.' });
+    const other = mailQ.byEmail.get(email);
+    if (other && other.id !== user.id) return res.status(409).json({ error: 'That email is already used by another account.' });
+    const code = sixDigits();
+    mailQ.setCode.run(sha256(code), Date.now() + MAIL_CODE_MS, `verify:${email}`, Date.now(), user.id);
+    await sendMail(email, 'Confirm your email for Adulthood', `Your confirmation code is ${code}. It works for 15 minutes. If you did not ask for this, ignore this email.`);
+    res.json({ ok: true });
+  } catch (err) { console.error('email add failed', err); res.status(500).json({ error: 'Something went wrong. Try again.' }); }
+});
+app.get('/api/email', (req, res) => { const user = userFromToken(bearer(req)); if (!user) return res.status(401).json({ error: 'Not logged in.' }); res.json({ email: user.email || null }); });
+app.post('/api/email/verify', async (req, res) => {
+  try {
+    const user = userFromToken(bearer(req));
+    if (!user) return res.status(401).json({ error: 'Not logged in.' });
+    if (isBlocked(req.ip)) return res.status(429).json({ error: 'Too many attempts. Try again in about 15 minutes.' });
+    if (!mailCodeOk(user, (req.body || {}).code, 'verify:')) { recordAttempt(req.ip); return res.status(401).json({ error: 'Wrong or expired code.' }); }
+    const email = user.mail_kind.slice('verify:'.length);
+    const other = mailQ.byEmail.get(email);
+    if (other && other.id !== user.id) return res.status(409).json({ error: 'That email is already used by another account.' });
+    mailQ.setEmail.run(email, user.id);
+    mailQ.clearCode.run(user.id);
+    res.json({ ok: true, email });
+  } catch (err) { console.error('email verify failed', err); res.status(500).json({ error: 'Something went wrong. Try again.' }); }
+});
+
+// Forgot password, step 1: send a code to the account's verified email. Same answer whether or not the account exists.
+app.post('/api/reset-email/request', async (req, res) => {
+  try {
+    if (isBlocked(req.ip)) return res.status(429).json({ error: 'Too many attempts. Try again in about 15 minutes.' });
+    const who = typeof (req.body || {}).who === 'string' ? req.body.who.trim() : '';
+    if (!who || who.length > 254) return res.status(400).json({ error: 'Type your username or email.' });
+    const user = who.includes('@') ? mailQ.byEmail.get(who.toLowerCase()) : q.userByName.get(who);
+    if (user && user.email && Date.now() - (user.mail_sent || 0) >= MAIL_COOLDOWN_MS) {
+      const code = sixDigits();
+      mailQ.setCode.run(sha256(code), Date.now() + MAIL_CODE_MS, 'reset', Date.now(), user.id);
+      await sendMail(user.email, 'Reset your Adulthood password', `Your password reset code is ${code}. It works for 15 minutes. If you did not ask for this, ignore this email and your password stays the same.`);
+    } else recordAttempt(req.ip);
+    res.json({ ok: true });
+  } catch (err) { console.error('reset-email request failed', err); res.status(500).json({ error: 'Something went wrong. Try again.' }); }
+});
+// Step 2: the 6-digit code plus a new password.
+app.post('/api/reset-email/confirm', async (req, res) => {
+  try {
+    if (isBlocked(req.ip)) return res.status(429).json({ error: 'Too many attempts. Try again in about 15 minutes.' });
+    const { who, code, newPassword } = req.body || {};
+    if (typeof who !== 'string' || typeof code !== 'string') return res.status(400).json({ error: 'Fill in every field.' });
+    if (typeof newPassword !== 'string' || newPassword.length < 8 || newPassword.length > 100) return res.status(400).json({ error: 'Password must be 8 to 100 characters.' });
+    const user = who.includes('@') ? mailQ.byEmail.get(who.trim().toLowerCase()) : q.userByName.get(who.trim());
+    if (!user || !mailCodeOk(user, code.trim(), 'reset')) { recordAttempt(req.ip); return res.status(401).json({ error: 'Wrong or expired code.' }); }
+    const newCode = newRecoveryCode();
+    q.setCredentials.run(await hashPassword(newPassword), await hashPassword(normalizeCode(newCode)), user.id);
+    mailQ.clearCode.run(user.id);
+    q.deleteUserSessions.run(user.id);
+    dropLive(user.id);
+    res.json({ recoveryCode: newCode });
+  } catch (err) { console.error('reset-email confirm failed', err); res.status(500).json({ error: 'Something went wrong. Try again.' }); }
 });
 
 // For accounts without a recovery code (or to replace a lost one): needs login plus the password.
@@ -772,14 +890,17 @@ function snapshot(key) {
     .map((p) => {
       const look = publicLook(p.wardrobe);
       const o = look ? { id: p.id, name: p.name, x: p.x, z: p.z, color: p.color, look } : { id: p.id, name: p.name, x: p.x, z: p.z, color: p.color };
-      if (p.riding) { o.ride = p.riding; o.ry = p.ry || 0; }
+      if (p.riding) { o.ride = p.riding; o.ry = p.ry || 0; if (p.drive) { const vm = VEHICLES[activeVehicle(p, p.drive.kind)]; if (vm && vm.model) o.rm = vm.model; } }
       if (p.shift) o.work = 1;
       if (p.sit) o.sit = 1;
+      if (p.lying) o.lie = 1;
       if (p.anim && p.anim.until > Date.now()) o.an = p.anim.k;
       if (p.body === 'woman') o.b = 1;
       if (p.eyes && p.eyes !== 'brown') o.e = p.eyes;
       if (p.skin) o.s = p.skin;
       if (p.hair && p.hair !== 'brown') o.h = p.hair;
+      if (p.style && p.style !== 'original') o.y = p.style;
+      if (p.faceShape && p.faceShape.some(Boolean)) o.f = p.faceShape;
       return o;
     });
 }
@@ -948,10 +1069,12 @@ function jobsInfo(p) {
     }),
   };
 }
+// The vehicle of this kind the player drives: the last one of that kind in their list (using one moves it to the end).
+const activeVehicle = (p, kind) => { for (let k = p.vehicles.length - 1; k >= 0; k--) if (VEHICLES[p.vehicles[k]].kind === kind) return p.vehicles[k]; return null; };
 function vehiclesInfo(p) {
   return {
     here: p.room === 'garage' && venueOpen('garage'),
-    list: VEHICLE_IDS.map((id) => ({ id, label: VEHICLES[id].label, cost: VEHICLES[id].cost, text: VEHICLES[id].text, owned: p.vehicles.includes(id) })),
+    list: VEHICLE_IDS.map((id) => ({ id, label: VEHICLES[id].label, cost: VEHICLES[id].cost, text: VEHICLES[id].text, tier: VEHICLES[id].tier, kind: VEHICLES[id].kind, model: VEHICLES[id].model || null, owned: p.vehicles.includes(id), using: activeVehicle(p, VEHICLES[id].kind) === id })),
   };
 }
 const sendVehicles = (p) => p.socket.emit('vehicles', vehiclesInfo(p));
@@ -1242,6 +1365,18 @@ process.on('SIGTERM', shutdown);
 
 // Put a player into a room straight away (no trip). Used when a venue closes or the landlord locks the door.
 // This can push a room slightly over its cap for a moment, which is better than leaving someone stranded.
+// Boxes you cannot walk through where you are now: the room's own props plus, at home, the furniture placed there.
+function extraSolids(p) {
+  if (p.room === HOME) return homeSolids(p.home);
+  if (p.room === 'friendhome') { const host = byUser.get(p.visiting); return host ? homeSolids(host.home) : []; }
+  return null;
+}
+const HOSPITAL_BEDS = [{ x: -8, z: -5.9 }, { x: -1, z: -5.9 }]; // the middle bed holds the ambient patient
+function getUp(p) {
+  if (!p.lying) return;
+  p.lying = false; p.bedAt = null; p.anim = null;
+  p.z = p.tz = -4; // beside the bed
+}
 function moveNow(p, roomId, x = roomId === 'street' ? CITY.spawn.x : 0, z = roomId === 'street' ? CITY.spawn.z : 0, city = p.city) {
   const old = spaceOf(p);
   if (old) p.socket.leave(old);
@@ -1251,6 +1386,7 @@ function moveNow(p, roomId, x = roomId === 'street' ? CITY.spawn.x : 0, z = room
   if (roomId === HOME) p.city = p.homeCity; // your home is in the city you live in
   if (p.city !== prevCity) { p.friendsSig = ''; sendFriends(p, true); } // friends' houses differ in each city
   p.trip = null;
+  if (p.lying) { p.lying = false; p.bedAt = null; p.anim = null; }
   p.x = p.tx = x;
   p.z = p.tz = z;
   p.warnedClose = false;
@@ -1275,14 +1411,28 @@ function startRide(p, method, mode, toId) {
   const now = Date.now();
   const waitEnd = now + RIDE_WAIT[method] * rush * 1000;
   p.tx = p.x; p.tz = p.z;
-  p.trip = { to: 'street', label: ROOMS[toId].name, start: now, end: waitEnd + rideSec * 1000, ride: { k: method, route, door: { x: door.x, z: door.z }, waitEnd, rideEnd: waitEnd + rideSec * 1000 } };
+  p.trip = { to: 'street', label: ROOMS[toId].name, start: now, end: waitEnd + rideSec * 1000, ride: { k: method, route, door: { x: door.x, z: door.z }, waitEnd, rideEnd: waitEnd + rideSec * 1000, v0: route.total / rideSec, s: 0, delay: 0, blockedFor: 0, free: 0 } };
   return true;
 }
-function stepRide(p, now) {
+// The vehicle keeps to its route but slows and stops for a car in its way (it used to drive straight through traffic).
+const RIDE_HALF_LEN = { bus: 5, taxi: 2.1, car: 2.1, bike: 1 };
+function stepRide(p, now, dt) {
   const r = p.trip.ride;
-  if (now >= r.rideEnd) return finishRide(p, 'Arrived at ' + p.trip.label + '.');
   if (now < r.waitEnd) return;
-  const s = ((now - r.waitEnd) / (r.rideEnd - r.waitEnd)) * r.route.total;
+  let f = 1;
+  {
+    const tr = ctxOf(p).traffic;
+    const gap = tr.carAhead(p.x, p.z, p.ry || 0, 9, RIDE_HALF_LEN[r.k] || 2.1);
+    if (gap !== null) f = Math.max(0, Math.min(1, (gap - 1.5) / 6));
+    r.blockedFor = f < 0.05 ? r.blockedFor + dt : 0;
+    // Stuck for a long time (two vehicles waiting for each other)? That one car drives off the map instead, so nobody deadlocks.
+    if (r.blockedFor > 8 && tr.carAhead.last) { tr.carAhead.last.on = false; tr.carAhead.last.v = 0; r.blockedFor = 0; }
+  }
+  r.s += r.v0 * f * dt;
+  r.delay += (1 - f) * dt;
+  p.trip.end = p.trip.start + (r.waitEnd - p.trip.start) + ((r.route.total / r.v0) + r.delay) * 1000;
+  if (r.s >= r.route.total) return finishRide(p, 'Arrived at ' + p.trip.label + '.');
+  const s = r.s;
   const pt = pointOnRoute(r.route.points, s);
   p.x = p.tx = pt.x; p.z = p.tz = pt.z; p.ry = pt.ry; p.riding = r.k;
 }
@@ -1521,7 +1671,8 @@ function takeHighway(p, side, now) {
 
 // Get behind the wheel at the player's position, facing ry.
 function beginDrive(p, kind, ry) {
-  p.drive = newDrive(kind, p.x, p.z, ry);
+  const vid = activeVehicle(p, kind);
+  p.drive = newDrive(kind, p.x, p.z, ry, vid ? VEHICLES[vid].speed : 1);
   p.driveIn = { steer: 0, thr: 0 };
   p.tx = p.x; p.tz = p.z;
   p.riding = kind; p.ry = ry;
@@ -1757,10 +1908,13 @@ io.on('connection', (socket) => {
     home: parseHome(saved.home),
     homeTimes: [],
     wardrobe: parseWardrobe(saved.wardrobe),
+    faceShape: (() => { try { const a = JSON.parse(saved.face); return Array.isArray(a) && a.length === FACE_N && a.every((n) => Number.isInteger(n) && n >= -3 && n <= 3) ? a : new Array(FACE_N).fill(0); } catch { return new Array(FACE_N).fill(0); } })(),
+    lookDone: saved.look_done !== 0,
     body: saved.body === 'woman' ? 'woman' : 'man',
     eyes: EYE_IDS.includes(saved.eyes) ? saved.eyes : 'brown',
     skin: Number.isInteger(saved.skin) && saved.skin >= 0 && saved.skin < SKIN_COUNT ? saved.skin : 0,
     hair: HAIR_IDS.includes(saved.hair) ? saved.hair : 'brown',
+    style: STYLE_IDS.includes(saved.style) ? saved.style : 'original',
     fines: cleanFines(saved.fines),
     jailUntil: saved.jail_until || 0,
     lastSteal: 0,
@@ -1832,6 +1986,7 @@ io.on('connection', (socket) => {
   byUser.set(user.id, p);
   socket.join(spaceKey(room, user.id, p.city));
   socket.emit('welcome', {
+    needLook: saved.look_done === 0,
     startDay: Math.floor((Number(saved.start_min) || 0) / DAY_MIN),
     id: socket.id,
     username: user.username,
@@ -1865,15 +2020,30 @@ io.on('connection', (socket) => {
   });
   // The character editor saves the whole look at once. Every value is checked against the lists above.
   socket.on('setLook', (v) => {
-    const l = cleanLook(v, p);
-    p.body = l.body; p.eyes = l.eyes; p.skin = l.skin; p.hair = l.hair;
-    q.setLook.run(l.body, l.eyes, l.skin, l.hair, p.userId);
+    const l = cleanLook(v, { ...p, face: p.faceShape });
+    if (p.lookDone) l.body = p.body;   // the body (man or woman) is chosen once, when the account is made
+    else { p.lookDone = true; q.lookDone.run(p.userId); }
+    p.body = l.body; p.eyes = l.eyes; p.skin = l.skin; p.hair = l.hair; p.style = l.style;
+    p.faceShape = l.face; q.setLook.run(l.body, l.eyes, l.skin, l.hair, l.style, JSON.stringify(l.face), p.userId);
   });
   // Eye colour: only the listed colours are accepted.
   socket.on('setEyes', (v) => {
     if (typeof v !== 'string' || !EYE_IDS.includes(v)) return;
     p.eyes = v;
     q.setEyes.run(v, p.userId);
+  });
+  // Rest in a free hospital bed when you are sick (or get up again). You recover twice as fast while lying down.
+  socket.on('restBed', () => {
+    if (p.lying) return getUp(p);
+    if (p.trip || p.drive || p.shift || p.riding || jailLeft(p) || p.room !== 'hospital') return notice(p, 'Beds are in the Hospital.');
+    if (!p.sick) return notice(p, 'You are not sick. The beds are for patients.');
+    const used = new Set([...players.values()].filter((o) => o.lying && o.room === 'hospital').map((o) => o.bedAt));
+    const bed = HOSPITAL_BEDS.find((b) => !used.has(b.x));
+    if (!bed) return notice(p, 'All the beds are taken. Wait a moment.');
+    p.lying = true; p.bedAt = bed.x; p.sit = false;
+    p.x = p.tx = bed.x; p.z = p.tz = bed.z;
+    p.anim = { k: 9, until: Date.now() + 1e11 };
+    notice(p, 'You lie down to rest. Tap Get up when you feel better.');
   });
   // Sit down where you stand (or stand up again). Walking anywhere stands you up.
   socket.on('sit', () => {
@@ -1885,6 +2055,7 @@ io.on('connection', (socket) => {
   socket.on('moveTo', (t) => {
     if (p.trip || p.drive) return;
     if (p.frozenUntil && Date.now() < p.frozenUntil) return; // still in the hospital bed
+    if (p.lying) getUp(p);
     if (p.sit && t && Number.isFinite(t.x) && Number.isFinite(t.z) && Math.hypot(t.x - p.x, t.z - p.z) > 0.3) p.sit = false;
     const now = Date.now();
     if (now - p.lastMove < 50) return; // ignore floods
@@ -1900,7 +2071,7 @@ io.on('connection', (socket) => {
     // A tap (not a held joystick or key) finds its way around buildings, trees and furniture.
     if (!(t.d === 1 || t.d === true) && Math.hypot(p.tx - p.x, p.tz - p.z) > 1.2) {
       const street = p.room === 'street';
-      const blocked = street ? (x, z) => ctxOf(p).walls.blocked(x, z) : roomBlockedFn(p.room);
+      const blocked = street ? (x, z) => ctxOf(p).walls.blocked(x, z) : roomBlockedFn(p.room, extraSolids(p));
       const path = findPath(blocked, { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, street ? { bx: b.bx, bz: b.bz, cell: 1 } : { bx: b.bx, bz: b.bz, cell: 0.5 });
       if (path && path.length) { p.path = path; p.pathKey = `${p.tx},${p.tz}`; }
     }
@@ -2194,8 +2365,17 @@ io.on('connection', (socket) => {
     if (p.cash < v.cost) return notice(p, `${v.label} costs ₦${v.cost.toLocaleString('en-US')}.`);
     p.cash -= v.cost;
     p.vehicles.push(id);
-    notice(p, `You bought a ${v.label.toLowerCase()}! It is now on your Map.`);
+    notice(p, `You bought the ${v.label}! It is now on your Map.`);
     socket.emit('travel', travelOf(p));
+    sendVehicles(p);
+  });
+
+  // Request: choose which of your cars you drive.
+  socket.on('useVehicle', (id) => {
+    if (typeof id !== 'string' || !Object.hasOwn(VEHICLES, id) || !p.vehicles.includes(id)) return;
+    if (p.drive) return notice(p, 'Park first.');
+    p.vehicles = p.vehicles.filter((x) => x !== id).concat(id);
+    notice(p, `You will drive the ${VEHICLES[id].label}.`);
     sendVehicles(p);
   });
 
@@ -2850,11 +3030,12 @@ io.on('connection', (socket) => {
       return notice(p, 'You got out.');
     }
     if (p.drive) return;
-    const kind = p.vehicles.includes('car') && req.kind !== 'bike' ? 'car' : p.vehicles.includes('bike') ? 'bike' : null;
+    const wantCar = activeVehicle(p, 'car'), wantBike = activeVehicle(p, 'bike');
+    const kind = wantCar && req.kind !== 'bike' ? 'car' : wantBike ? 'bike' : null;
     if (!kind) return notice(p, 'You need a car or a bicycle. Buy one at Kanis Motors.');
     const ry = Math.hypot(p.tx - p.x, p.tz - p.z) > 1 ? Math.atan2(p.tx - p.x, p.tz - p.z) : (p.face || 0);
     beginDrive(p, kind, ry);
-    notice(p, kind === 'car' ? 'You are in your car. Arrow keys or the stick to drive.' : 'You are on your bicycle.');
+    notice(p, kind === 'car' ? `You are in your ${VEHICLES[wantCar].label}. Arrow keys or the stick to drive.` : 'You are on your bicycle.');
   });
   socket.on('driveInput', (inp) => {
     if (!p.drive || !inp || typeof inp !== 'object') return;
@@ -3139,6 +3320,7 @@ setInterval(() => {
   const walkers = {}, drivers = {}, copsOut = {};
   for (const id of CITY_IDS) { walkers[id] = []; drivers[id] = []; copsOut[id] = []; }
   for (const p of players.values()) {
+    if (p.room === 'street' && p.trip && p.trip.ride && now >= p.trip.ride.waitEnd) { const fx = Math.sin(p.ry || 0), fz = Math.cos(p.ry || 0); for (const k of (p.trip.ride.k === 'bus' ? [-4, -2, 0, 2, 4] : [-1, 0, 1])) drivers[p.city].push({ x: p.x + fx * k, z: p.z + fz * k }); continue; } // a vehicle on its ride: cars brake for all of its length
     if (p.room !== 'street' || p.trip) continue;
     if (p.drive) drivers[p.city].push({ x: p.x, z: p.z });
     else walkers[p.city].push({ id: p.id, x: p.x, z: p.z, p });
@@ -3155,6 +3337,38 @@ setInterval(() => {
     if (res === 'lost') { p.wanted = null; notice(p, 'You lost the police. Stay out of trouble!'); continue; }
     for (const c of w.cops) copsOut[p.city].push([Math.round(c.x * 10) / 10, Math.round(c.z * 10) / 10, Math.round(c.ry * 100) / 100]);
   }
+  // Street policing: a patrol car sees speeders close to it, and checkpoints check passing drivers.
+  for (const p of players.values()) {
+    if (p.room !== 'street' || p.trip || !p.drive || p.wanted || jailLeft(p)) continue;
+    const v = Math.abs(p.drive.v), ctx = ctxOf(p);
+    if (v > SPEED_LIMIT && now - (p.lastSeen || 0) > 20000) {
+      for (const c of ctx.traffic.copCars()) if (Math.hypot(c.x - p.x, c.z - p.z) < PATROL_SEE) {
+        p.lastSeen = now;
+        startChase(p, 'speeding', 'A police patrol saw you speeding! Slow down and pull over, or lose them.');
+        break;
+      }
+      if (p.wanted) continue;
+    }
+    p.cpAt = p.cpAt || {};
+    for (const cp of ctx.checkpoints) {
+      const dcp = Math.hypot(cp.x - p.x, cp.z - p.z);
+      if (dcp > CHECK_REACH || now - (p.cpAt[cp.i] || 0) < CHECK_COOLDOWN_MS) continue;
+      if (v <= SPEED_LIMIT && dcp > 2.5) continue; // slow drivers are checked as they pull level with the checkpoint
+      p.cpAt[cp.i] = now;
+      const chance = process.env.CHECK_CHANCE !== undefined ? Number(process.env.CHECK_CHANCE) : CHECK_CHANCE;
+      if (Math.random() >= chance) continue;
+      if (wantedByPolice(p.fines, world.gameMin)) {
+        const paid = payOldestFirst(p.fines, p.cash, world.gameMin);
+        if (paid) { p.cash -= paid; q.addLedger.run(p.userId, 'fine', 0, -paid, p.bank.bal, p.cash, 'Police fine (checkpoint)', Math.floor(world.gameMin), now); p.ledgerSig = null; }
+        p.drive = null; p.riding = null;
+        lockUp(p, ARREST_JAIL_SEC, `The checkpoint officer checked your record: unpaid fines. You are arrested.${paid ? ` They took ₦${paid.toLocaleString('en-NG')}.` : ''}`);
+      } else if (v > SPEED_LIMIT) {
+        const f = newFine(p.fines, 'speeding', world.gameMin);
+        if (f) { addRep(p, OFFENCES.speeding.rep, 'speeding past a checkpoint'); sendFines(p, true); notice(p, `Checkpoint: you were speeding. A fine of ₦${f.base.toLocaleString('en-NG')} is on your record.`); }
+      } else notice(p, 'Checkpoint: the officer checked you and waved you through.');
+      break;
+    }
+  }
   // Each city has its own traffic, and it only runs while someone is on that city's street.
   for (const id of CITY_IDS) {
     if (!walkers[id].length && !drivers[id].length) continue;
@@ -3164,8 +3378,9 @@ setInterval(() => {
     }
   }
   for (const p of players.values()) {
+    if (p.lying && p.trip) { p.lying = false; p.bedAt = null; p.anim = null; }
     if (p.trip) {
-      if (p.trip.ride) stepRide(p, now);
+      if (p.trip.ride) stepRide(p, now, dt);
       else if (now >= p.trip.end) arrive(p);
       continue;
     }
@@ -3189,8 +3404,8 @@ setInterval(() => {
         const m = slide((x, z) => cx.walls.blocked(x, z), p.x, p.z, (dx / d) * step, (dz / d) * step);
         // Cars are solid too: you cannot walk into one (unless you are already inside it, so you can get out).
         if (!cx.traffic.blocked(m.x, m.z) || cx.traffic.blocked(p.x, p.z)) { p.x = m.x; p.z = m.z; }
-      } else if (roomSolids(p.room).length) {
-        const m = slide(roomBlockedFn(p.room), p.x, p.z, (dx / d) * step, (dz / d) * step);
+      } else if (roomSolids(p.room).length || p.room === HOME || p.room === 'friendhome') {
+        const m = slide(roomBlockedFn(p.room, extraSolids(p)), p.x, p.z, (dx / d) * step, (dz / d) * step);
         p.x = m.x; p.z = m.z;
       } else {
         p.x += (dx / d) * step;
@@ -3243,7 +3458,7 @@ setInterval(() => {
       room: p.room,
       jail: jailLeft(p),
       owns: p.vehicles,
-      drive: p.drive ? { kind: p.drive.kind, kmh: Math.round(Math.abs(p.drive.v) * 3.6) } : null,
+      drive: p.drive ? { kind: p.drive.kind, model: (VEHICLES[activeVehicle(p, p.drive.kind)] || {}).model || null, cockpit: (VEHICLES[activeVehicle(p, p.drive.kind)] || {}).cockpit || null, kmh: Math.round(Math.abs(p.drive.v) * 3.6) } : null,
       wanted: p.wanted ? { cops: p.wanted.cops.length, secs: Math.round((now - p.wanted.since) / 1000) } : null,
       rooms,
       walk: p.auto ? { to: ROOMS[p.auto.to].name, toId: p.auto.to, stage: p.auto.stage, progress: p.auto.d0 ? Math.max(0, Math.min(1, 1 - Math.hypot(p.x - (doorFor(p, p.auto.to) || p).x, p.z - (doorFor(p, p.auto.to) || p).z) / p.auto.d0)) : 0 } : null,
@@ -3251,7 +3466,7 @@ setInterval(() => {
         ? {
             to: p.trip.label || ROOMS[p.trip.to].name,
             ambulance: !!p.trip.ambulance, train: !!p.trip.train, kind: p.trip.kind || null,
-            progress: Math.min(1, (now - p.trip.start) / (p.trip.end - p.trip.start)),
+            progress: p.trip.ride && now >= p.trip.ride.waitEnd ? Math.min(1, p.trip.ride.s / Math.max(1, p.trip.ride.route.total)) : Math.min(1, (now - p.trip.start) / (p.trip.end - p.trip.start)),
             secs: Math.round((p.trip.end - p.trip.start) / 1000),
             ride: p.trip.ride ? { k: p.trip.ride.k, phase: now < p.trip.ride.waitEnd ? 'wait' : 'ride', waitLeft: Math.max(0, Math.ceil((p.trip.ride.waitEnd - now) / 1000)) } : null,
           }
@@ -3282,7 +3497,8 @@ function healthTick() {
   for (const p of players.values()) {
     if (p.sick) {
       p.energy = Math.max(0, p.energy - DECAY_PER_MIN.energy * dtMin); // a cold doubles how fast you tire
-      p.sickMin += dtMin;
+      p.sickMin += dtMin * (p.lying ? 2 : 1);
+      if (p.lying) p.energy = Math.min(100, p.energy + DECAY_PER_MIN.energy * dtMin * 2.5);
       if (p.sickMin >= SICK.autoRecoverMin) {
         p.sick = false;
         p.sickMin = 0;

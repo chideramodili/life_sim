@@ -35,6 +35,8 @@ export function createTraffic(city, blockedAt = () => false, opts = {}) {
       cars.push({ id: cars.length, li, t: rc() * ln.len, v: vmax, vmax, color: Math.floor(rc() * CAR_COLORS), on: true, x: 0, z: 0, ry: 0, fx: 0, fz: 0 });
     }
   });
+  // A few of the cars are police patrols: slower, and they watch for speeders (see index.js).
+  cars.forEach((c, i) => { if (i % 17 === 5 && !cars.some((o) => o.cop && o.li === c.li)) { c.cop = true; c.vmax = 7; } });
   // Cars on the same lane start well apart: sort and nudge so none begin on top of another.
   for (const ln of lanes.keys()) {
     const on = cars.filter((c) => c.li === ln).sort((a, b) => a.t - b.t);
@@ -174,6 +176,27 @@ export function createTraffic(city, blockedAt = () => false, opts = {}) {
   }
 
   // Compact view for the browsers: [x, z, ry, colour] per car, rounded to keep messages small.
-  const view = () => cars.map((c) => !c.on ? [9999, 9999, 0, c.color] : [Math.round(c.x * 10) / 10, Math.round(c.z * 10) / 10, Math.round(c.ry * 100) / 100, c.color]);
-  return { cars, parked, bays, lanes, step, blocked, view, setLevel, HIT_MIN };
+  const view = () => cars.map((c) => !c.on ? [9999, 9999, 0, c.cop ? 100 : c.color] : [Math.round(c.x * 10) / 10, Math.round(c.z * 10) / 10, Math.round(c.ry * 100) / 100, c.color]);
+  // Is a car in the way of something driving along (x, z) facing ry (a bus on its ride, say)? Returns the free gap in metres, or null.
+  // Cars going the same way, or crossing in front, count; cars passing the other way in their own lane do not.
+  function carAhead(x, z, ry, range, halfLen = HALF_LEN) {
+    const fx = Math.sin(ry), fz = Math.cos(ry);
+    let best = null, who = null;
+    for (const c of cars) {
+      if (!c.on) continue;
+      const dx = c.x - x, dz = c.z - z;
+      if (Math.abs(dx) > range + 6 || Math.abs(dz) > range + 6) continue;
+      const along = dx * fx + dz * fz;
+      const lat = Math.abs(dx * -fz + dz * fx);
+      const dot = c.fx * fx + c.fz * fz;
+      const near = dot > 0.5 ? lat < 2.4 : dot < -0.5 ? lat < 0.9 : lat < HALF_LEN + 1.2 && Math.abs(along) < HALF_LEN + halfLen + 3;
+      if (!near || along <= 0 || along > range + HALF_LEN + halfLen) continue;
+      const gap = along - HALF_LEN - halfLen;
+      if (best === null || gap < best) { best = gap; who = c; }
+    }
+    carAhead.last = who;
+    return best;
+  }
+  const copCars = () => cars.filter((c) => c.cop && c.on);
+  return { cars, parked, bays, lanes, step, blocked, view, setLevel, carAhead, copCars, HIT_MIN };
 }

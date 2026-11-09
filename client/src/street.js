@@ -7,6 +7,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { whenNpcReady, upgradeToNpc, moveNpc } from './npc.js';
 import { viaductSegs, createViaductTrains } from './trains.js';
+import { loadCar, carClone, carReady, makeVehicle, TRAFFIC_MODELS } from './vehicles.js';
 
 const rnd = (seed) => {
   let s = seed >>> 0;
@@ -549,12 +550,67 @@ export function createCity(info) {
     tmp.updateMatrix();
     inst.setMatrixAt(i, tmp.matrix);
   };
+  const hiddenCars = new Set(); // instance numbers drawn as real models instead of boxes
   const setCar = (i, x, z, ry) => {
+    tmp.scale.setScalar(hiddenCars.has(i) ? 0.0001 : 1);
     place(bodyI, i, x, 0.55, z, ry);
     place(topI, i, x, 1.05, z, ry, 0, -0.2);
     place(wheelF, i, x, 0.3, z, ry, 0, 1.4);
     place(wheelB, i, x, 0.3, z, ry, 0, -1.4);
+    tmp.scale.setScalar(1);
   };
+  // Real car models for the cars near people (a few at a time, so phones keep up); the far ones stay simple boxes.
+  const NEAR_MAX = 14, NEAR_DIST = 48;
+  const nearPool = {}; // model -> [{ obj, used }]
+  for (const n of new Set(TRAFFIC_MODELS)) loadCar(n);
+  loadCar('police');
+  function nearModels() {
+    const cand = [];
+    const consider = (i, x, z, ry) => {
+      let best = 1e9;
+      for (const q of people) { const d = Math.hypot(q.x - x, q.z - z); if (d < best) best = d; }
+      if (best < NEAR_DIST) cand.push({ i, x, z, ry, d: best });
+    };
+    parked.forEach((p, i) => consider(i, p.x, p.z, p.ry));
+    live.forEach((c, i) => consider(parked.length + i, c.x, c.z, c.ry));
+    for (const c of cand) if (c.i >= parked.length && live[c.i - parked.length].col === 100) c.d -= 1000; // patrol cars first, so they always get their model
+    cand.sort((a, b) => a.d - b.d);
+    const chosen = cand.slice(0, NEAR_MAX);
+    for (const arr of Object.values(nearPool)) for (const e of arr) e.used = false;
+    const was = new Set(hiddenCars);
+    hiddenCars.clear();
+    for (const c of chosen) {
+      const name = c.i >= parked.length && live[c.i - parked.length].col === 100 ? 'police' : TRAFFIC_MODELS[(c.i * 7 + 3) % TRAFFIC_MODELS.length];
+      if (!carReady(name)) continue;
+      const arr = nearPool[name] || (nearPool[name] = []);
+      let e = arr.find((q) => !q.used);
+      if (!e) { const obj = carClone(name); if (!obj) continue; root.add(obj); e = { obj, used: false }; arr.push(e); }
+      e.used = true; e.obj.visible = true;
+      e.obj.position.set(c.x, 0, c.z); e.obj.rotation.y = c.ry;
+      hiddenCars.add(c.i);
+    }
+    for (const arr of Object.values(nearPool)) for (const e of arr) if (!e.used) e.obj.visible = false;
+    // parked boxes are placed once, so redo the ones that switched
+    let redo = false;
+    parked.forEach((p, i) => { if (was.has(i) !== hiddenCars.has(i)) { setCar(i, p.x, p.z, p.ry); redo = true; } });
+    if (redo) bodyI.instanceMatrix.needsUpdate = topI.instanceMatrix.needsUpdate = wheelF.instanceMatrix.needsUpdate = wheelB.instanceMatrix.needsUpdate = true;
+  }
+  // Police checkpoints on the main road (same rule as the server: two on the first east-west road). A patrol car, cones and a sign.
+  {
+    const rw0 = city.roadsEW[0], cx = Math.round(city.bx * 0.42);
+    for (const x of [-cx, cx]) {
+      const g = new THREE.Group();
+      const car = makeVehicle('police'); car.position.set(0, 0, rw0.half - 2.2); car.rotation.y = Math.PI / 2; g.add(car);
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.7, 10), new THREE.MeshStandardMaterial({ color: '#ff7a1a' }));
+      for (let k = 0; k < 5; k++) { const c2 = cone.clone(); c2.position.set(-5 + k * 0.5, 0.35, rw0.half - 5 - k * 1.1); g.add(c2); }
+      const sign = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.7, 0.08), new THREE.MeshStandardMaterial({ color: '#1b3a8a', emissive: '#102060' }));
+      sign.position.set(-3, 1.6, rw0.half - 1); g.add(sign);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 1.6, 6), new THREE.MeshStandardMaterial({ color: '#555' }));
+      pole.position.set(-3, 0.8, rw0.half - 1); g.add(pole);
+      g.position.set(x, 0, rw0.z);
+      root.add(g);
+    }
+  }
   parked.forEach((p, i) => { bodyI.setColorAt(i, new THREE.Color(CAR_COLORS[p.color % CAR_COLORS.length])); setCar(i, p.x, p.z, p.ry); });
   const friendSigns = [];
   let density = 0.7;
@@ -783,6 +839,7 @@ export function createCity(info) {
         c.ry += ((((c.tr - c.ry) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI) * k;
         setCar(parked.length + i, c.x, c.z, c.ry);
       });
+      nearModels();
       bodyI.instanceMatrix.needsUpdate = topI.instanceMatrix.needsUpdate = wheelF.instanceMatrix.needsUpdate = wheelB.instanceMatrix.needsUpdate = true;
       // Pavements fill up before the rush and empty at night: one person appears or leaves every quarter second.
       const goal = Math.round(walkers.length * (0.3 + 0.7 * density));

@@ -154,6 +154,7 @@ export function initLife(socket) {
         ? 'You are burned out. Sleep (best at Home), play, or chat until stress drops to 50%.'
         : 'Work and study add stress. Sleeping, playing, chatting and exercise lower it.';
     // Medicine is sold at the Pharmacy, and only matters when you are sick.
+    window.__sick = Boolean(w.sick);
     $('medBtn').hidden = !(m.room === 'pharmacy' && w.sick);
   });
 

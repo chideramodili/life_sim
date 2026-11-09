@@ -260,6 +260,7 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     #boutiqueBtn, #wardrobeBtn { width: 100%; height: 40px; border: 0; border-radius: 10px; font-weight: 600; background: var(--hi); color: var(--on-hi); margin-bottom: 8px; }
     #fpvBtn { position: fixed; right: 12px; top: 64px; z-index: 6; padding: 8px 12px; border: 0; border-radius: 18px; background: rgba(0,0,0,0.55); color: #fff; font: inherit; font-size: 13px; }
     #installBtn { position: fixed; left: 12px; bottom: 12px; z-index: 30; padding: 10px 14px; border: 0; border-radius: 20px; background: var(--hi); color: var(--on-hi); font: inherit; font-weight: 700; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.35); }
+    #bedBtn { position: fixed; right: 12px; top: 148px; z-index: 6; padding: 8px 12px; border: 0; border-radius: 18px; background: rgba(0,0,0,0.55); color: #fff; font: inherit; font-size: 13px; }
     #sitBtn { position: fixed; right: 12px; top: 104px; z-index: 6; padding: 8px 12px; border: 0; border-radius: 18px; background: rgba(0,0,0,0.55); color: #fff; font: inherit; font-size: 13px; }
     body.seated #sitBtn { display: none !important; }
     #seatBtn { position: fixed; right: 12px; top: 64px; z-index: 6; padding: 8px 12px; border: 0; border-radius: 18px; background: rgba(0,0,0,0.55); color: #fff; font: inherit; font-size: 13px; }
@@ -336,6 +337,14 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     <button id="boutiqueBtn" hidden>Boutique: clothes and perfume</button>
     <button id="wardrobeBtn" hidden>Wardrobe</button>
     <button id="medBtn" hidden>Buy medicine ₦3,000</button>
+    <div id="mailBox" class="extra" style="margin-bottom:8px;">
+      <div style="font-size:calc(11px * var(--fs));color:var(--muted);margin-bottom:4px;">Email for password reset: <b id="mailNow">none yet</b></div>
+      <input id="mailIn" class="field" placeholder="you@example.com" maxlength="254" style="height:32px;margin:0 0 4px;" />
+      <button id="mailSend" class="extra" style="margin-bottom:4px;">Send me a code</button>
+      <input id="mailCode" class="field" placeholder="6-digit code" maxlength="6" inputmode="numeric" style="height:32px;margin:0 0 4px;" hidden />
+      <button id="mailVerify" class="extra" hidden>Confirm email</button>
+      <div id="mailMsg" style="font-size:calc(11px * var(--fs));color:var(--muted);"></div>
+    </div>
     <button id="logout" class="extra">Log out</button>
     <div id="notice">Tap the ground to walk.</div>
     <div id="hint" class="extra">Drag to rotate. Scroll or pinch to zoom.</div>
@@ -373,6 +382,7 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
   <button id="fpvBtn" hidden>👁 First person</button>
   <button id="installBtn" hidden>📲 Install app</button>
   <button id="sitBtn" hidden>🪑 Sit</button>
+  <button id="bedBtn" hidden>🛏 Rest in bed</button>
   <button id="seatBtn" hidden>🚗 Driver view</button>
   <div id="dash"></div>
   <div id="camBar"><button id="photoBtn" aria-label="Take a photo" title="Photo">📷</button><button id="selfieBtn" aria-label="Take a selfie" title="Selfie">🤳</button></div>
@@ -652,8 +662,6 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     <div id="logoAuth" class="brand"></div>
     <div class="sub">Log in, or create an account</div>
     <div class="jlabel" style="margin-top:6px">New here? Make your character</div>
-    <button id="authChar" class="alt" type="button">Create your character</button>
-    <div id="authCharSum" class="fine"></div>
     <input id="user" class="field" placeholder="Username" autocomplete="username" maxlength="16" />
     <input id="pass" class="field" type="password" placeholder="Password (8 or more characters)" autocomplete="current-password" maxlength="100" />
     <div id="authError" class="err"></div>
@@ -664,9 +672,10 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
 
   <div id="reset" class="panel" hidden>
     <div class="logo">RESET PASSWORD</div>
-    <div class="sub">Enter your username, your recovery code, and a new password</div>
+    <div class="sub">Enter your username, your recovery code (or the code we email you), and a new password</div>
     <input id="ruser" class="field" placeholder="Username" autocomplete="username" maxlength="16" />
-    <input id="rcode" class="field" placeholder="Recovery code (XXXX-XXXX-XXXX-XXXX)" autocomplete="off" maxlength="40" />
+    <button id="rmail" class="alt" style="margin-bottom:8px;">Email me a code instead</button>
+    <input id="rcode" class="field" placeholder="Recovery code or 6-digit email code" autocomplete="off" maxlength="40" />
     <input id="rpass" class="field" type="password" placeholder="New password (8 or more characters)" autocomplete="new-password" maxlength="100" />
     <div id="resetError" class="err"></div>
     <button id="resetGo" class="big">Reset password</button>

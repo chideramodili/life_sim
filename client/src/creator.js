@@ -2,7 +2,8 @@
 // It opens when you create an account and again from the Look panel. It only edits a look object; the caller saves it.
 // Categories with `parts` need separate head and hair pieces from Blender; until those arrive they show a "coming" note.
 import * as THREE from 'three';
-import { loadModel, whenModelReady, attachModel, applyLook, animateModel, EYE_COLOURS, HAIR_COLOURS, SKIN_TONES } from './model.js';
+import { STYLES } from './hair.js';
+import { dressModel, loadModel, whenModelReady, attachModel, applyLook, animateModel, EYE_COLOURS, HAIR_COLOURS, SKIN_TONES, FACE_KEYS } from './model.js';
 
 const BASE_SKIN = [224, 172, 142];   // roughly the model's own skin, for the colour dots
 const dotSkin = (t) => `rgb(${BASE_SKIN.map((c, i) => Math.min(255, Math.round(c * t[i]))).join(',')})`;
@@ -16,11 +17,11 @@ export const CATEGORIES = [
   { id: 'skin', label: 'Skin', icon: '🎨', view: 'face' },
   { id: 'hair', label: 'Hair colour', icon: '💇', view: 'face' },
   { id: 'eyes', label: 'Eyes', icon: '👁️', view: 'face' },
-  { id: 'style', label: 'Hairstyle', icon: '✂️', view: 'face', parts: 'Hairstyles' },
+  { id: 'style', label: 'Hairstyle', icon: '✂️', view: 'face' },
   { id: 'brows', label: 'Brows', icon: '〰️', view: 'face', parts: 'Eyebrow shapes' },
-  { id: 'nose', label: 'Nose', icon: '👃', view: 'face', parts: 'Noses' },
-  { id: 'lips', label: 'Lips', icon: '👄', view: 'face', parts: 'Lips' },
-  { id: 'face', label: 'Face', icon: '🙂', view: 'face', parts: 'Face shapes' },
+  { id: 'nose', label: 'Nose', icon: '👃', view: 'face', sliders: [['noseW', 'Nose width'], ['noseL', 'Nose length']] },
+  { id: 'lips', label: 'Lips', icon: '👄', view: 'face', sliders: [['lipFull', 'Lip fullness'], ['mouthW', 'Mouth width']] },
+  { id: 'face', label: 'Face', icon: '🙂', view: 'face', sliders: [['jawW', 'Jaw width'], ['chinL', 'Chin length'], ['faceW', 'Face width']] },
   { id: 'beard', label: 'Facial hair', icon: '🧔', view: 'face', parts: 'Beards and moustaches' },
 ];
 
@@ -28,17 +29,20 @@ function optionsFor(cat) {
   if (cat === 'body') return [{ v: 'man', text: 'Man', icon: '🧍‍♂️' }, { v: 'woman', text: 'Woman', icon: '🧍‍♀️' }];
   if (cat === 'skin') return SKIN_TONES.map((t, i) => ({ v: i, text: `Skin tone ${i + 1}`, dot: dotSkin(t) }));
   if (cat === 'hair') return Object.keys(HAIR_COLOURS).map((id) => ({ v: id, text: cap(id), dot: HAIR_DOT[id] }));
+  if (cat === 'style') return Object.entries(STYLES).map(([id, text]) => ({ v: id, text, icon: { original: '💇', bald: '🥚', buzz: '🪒', low: '💈', curls: '➰', afro: '🌀', cornrows: '〰️', braids: '🪢', locs: '🧶', knots: '🍥', bun: '🍙', ponytail: '🎀', puffs: '☁️' }[id] }));
   if (cat === 'eyes') return Object.keys(EYE_COLOURS).map((id) => ({ v: id, text: cap(id), dot: EYE_DOT[id] }));
   return [];
 }
-const KEY = { body: 'body', skin: 'skin', hair: 'hair', eyes: 'eyes' };
+const KEY = { body: 'body', skin: 'skin', hair: 'hair', eyes: 'eyes', style: 'style' };
 
 // Open the editor. opts: { initial: {body, eyes, skin, hair}, onSave(look), title }. Returns { close }.
 export function openCreator(opts) {
-  const start = { body: 'man', eyes: 'brown', skin: 0, hair: 'brown', ...(opts.initial || {}) };
+  const start = { body: 'man', eyes: 'brown', skin: 0, hair: 'brown', face: null, ...(opts.initial || {}) };
+  start.style = start.style || 'original';
   let look = { ...start };
   const undo = [], redo = [];
-  let cat = 'body', view = 'body';
+  const cats = CATEGORIES.filter((c) => !(opts.lockBody && c.id === 'body'));
+  let cat = cats[0].id, view = cats[0].view;
 
   const root = document.createElement('div');
   root.id = 'creator';
@@ -65,6 +69,7 @@ export function openCreator(opts) {
   floor.rotation.x = -Math.PI / 2; scene.add(floor);
   const camera = new THREE.PerspectiveCamera(30, 1, 0.05, 30);
   const group = new THREE.Group(); scene.add(group);
+  if (location.search.includes('debug')) window.__cr = { scene, camera, group, dress: (look, cat) => dressModel(group, look, cat) };
   const VIEWS = { body: { y: 0.98, z: 5.2, ly: 0.92 }, face: { y: 1.6, z: 1.15, ly: 1.57 } };
   const cur = { y: VIEWS.body.y, z: VIEWS.body.z, ly: VIEWS.body.ly };
   let spin = 0.35, dragging = false, lastX = 0, alive = true, raf = 0, last = performance.now(), t = 0;
@@ -100,6 +105,7 @@ export function openCreator(opts) {
     cur.y += (v.y - cur.y) * k; cur.z += (v.z - cur.z) * k; cur.ly += (v.ly - cur.ly) * k;
     camera.position.set(0, cur.y, cur.z); camera.lookAt(0, cur.ly, 0);
     if (!dragging) spin += (0 - spin) * Math.min(1, dt * 0.8);   // settle back to facing you
+    if (window.__cr && window.__cr.hold != null) spin = window.__cr.hold;
     group.rotation.y = spin;
     if (group.userData.model) animateModel(group, dt, 0, 0, false, t);
     renderer.render(scene, camera);
@@ -107,7 +113,7 @@ export function openCreator(opts) {
 
   // --- the editor UI ---
   const tabs = $('.crTabs'), grid = $('.crGrid');
-  for (const c of CATEGORIES) {
+  for (const c of cats) {
     const b = document.createElement('button');
     b.type = 'button'; b.dataset.cat = c.id; b.className = 'crTab';
     b.innerHTML = `<span class="crIc">${c.icon}</span><span>${c.label}</span>`;
@@ -128,6 +134,26 @@ export function openCreator(opts) {
       const n = document.createElement('div'); n.className = 'crSoon';
       n.textContent = `${c.parts} are coming. They will appear here as soon as the character parts are added.`;
       grid.append(n); return;
+    }
+    if (c.sliders) {
+      const cur = () => (Array.isArray(look.face) ? look.face.slice() : new Array(FACE_KEYS.length).fill(0));
+      for (const [key, label] of c.sliders) {
+        const idx = FACE_KEYS.indexOf(key), row = document.createElement('label'); row.className = 'crSlide';
+        row.innerHTML = `<span>${label}</span><input type="range" min="-3" max="3" step="1" value="${cur()[idx] || 0}"><em>${cur()[idx] || 0}</em>`;
+        const inp = row.querySelector('input'), val = row.querySelector('em');
+        let before = null;
+        inp.addEventListener('input', () => {   // live preview while dragging; one undo step per drag
+          if (!before) before = look;
+          const f = cur(); f[idx] = Number(inp.value); val.textContent = String(f[idx]);
+          look = { ...look, face: f }; applyLook(group, look);
+        });
+        inp.addEventListener('change', () => { if (before) { undo.push(before); redo.length = 0; before = null; $('.crUndo').disabled = false; $('.crRedo').disabled = true; } });
+        grid.append(row);
+      }
+      const reset = document.createElement('button'); reset.type = 'button'; reset.className = 'crReset'; reset.textContent = 'Reset these';
+      reset.addEventListener('click', () => { const f = cur(); for (const [k] of c.sliders) f[FACE_KEYS.indexOf(k)] = 0; change({ face: f }); });
+      grid.append(reset);
+      return;
     }
     for (const o of optionsFor(cat)) {
       const b = document.createElement('button');
@@ -162,7 +188,8 @@ export function openCreator(opts) {
   $('.crX').addEventListener('click', close);
   $('.crSave').addEventListener('click', () => { const l = { ...look }; close(); if (opts.onSave) opts.onSave(l); });
 
-  select('body'); refresh();
+  if (opts.required) $('.crX').hidden = true;
+  select(cat); refresh();
   requestAnimationFrame(() => { resize(); raf = requestAnimationFrame(frame); });
   return { close, current: () => ({ ...look }) };
 }

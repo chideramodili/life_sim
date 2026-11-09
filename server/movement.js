@@ -14,8 +14,8 @@ const ROOM_SIZE = 10;       // rooms run from -10 to 10
 const PAD = 0.32;           // a person is not a point
 export const roomSolids = (id) => SOLIDS[id] || [];
 // Can a person stand at (x, z) in this room? (Not in a wall, not in furniture.)
-export function roomBlockedFn(id) {
-  const boxes = roomSolids(id);
+export function roomBlockedFn(id, extra = null) {
+  const boxes = extra && extra.length ? roomSolids(id).concat(extra) : roomSolids(id);
   return (x, z) => {
     if (Math.abs(x) > ROOM_SIZE - 0.3 || Math.abs(z) > ROOM_SIZE - 0.3) return true;
     for (const b of boxes) if (x > b[0] - PAD && x < b[2] + PAD && z > b[1] - PAD && z < b[3] + PAD) return true;

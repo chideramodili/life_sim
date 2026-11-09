@@ -1,5 +1,6 @@
 // Adulthood: people, quests, and vehicles on screen. The server owns the truth. This file only shows it and sends requests.
 import { hideOtherPanels } from './panels.js';
+import { carThumb, loadCar } from './vehicles.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -89,13 +90,21 @@ export function initSocial(socket) {
     vehiclesSig = sig;
     const body = $('carsBody');
     body.replaceChildren();
+    let tier = null;
     for (const v of vehicles.list) {
+      if (v.tier !== tier) { tier = v.tier; body.append(el('div', 'billWho', tier.toUpperCase())); }
       const row = el('div', 'job');
       const head = el('div', 'skillHead');
       head.append(el('span', 'skillName', v.label), el('span', 'tagc', `₦${fmt(v.cost)}`));
-      const btn = el('button', 'mini hot billPay', v.owned ? 'You own this' : vehicles.here ? 'Buy' : 'Kanis Motors is closed');
-      btn.disabled = v.owned || !vehicles.here;
-      btn.addEventListener('click', () => socket.emit('buyVehicle', v.id));
+      if (v.model) {
+        const url = carThumb(v.model);
+        if (url) { const img = el('img', 'carThumb'); img.src = url; img.alt = v.label; row.append(img); } else loadCar(v.model).then(() => { vehiclesSig = ''; paintVehicles(); });
+      }
+      const btn = v.owned
+        ? el('button', 'mini hot billPay', v.using ? 'You drive this' : 'Drive this one')
+        : el('button', 'mini hot billPay', vehicles.here ? 'Buy' : 'Kanis Motors is closed');
+      btn.disabled = v.owned ? v.using : !vehicles.here;
+      btn.addEventListener('click', () => socket.emit(v.owned ? 'useVehicle' : 'buyVehicle', v.id));
       row.append(head, el('div', 'billWho', v.text), btn);
       body.append(row);
     }

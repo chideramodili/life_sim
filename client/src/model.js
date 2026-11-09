@@ -3,8 +3,10 @@
 // model, so for now the outfit colours of Boutique clothes do not show on the body (worn accessories still do).
 // If the models cannot load, the simple built-in figure stays, so the game still works.
 import * as THREE from 'three';
+import { NAPE } from './nape.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
+import { applyHairStyle } from './hair.js';
 import { captureRig, poseStand, poseSit, poseExercise, exerciseTilt, poseReach } from './rig.js';
 
 const BODIES = ['man', 'woman'];
@@ -43,6 +45,8 @@ const IRIS = {
   man:   [[658, 868, 4.6], [705, 857, 3.6]],
   woman: [[734.5, 849, 5.2], [211, 961, 5.6]],
 };
+const BASE_SKIN = [224, 172, 142];
+export const skinHex = (i) => '#' + BASE_SKIN.map((c, n) => Math.min(255, Math.round(c * SKIN_TONES[i][n])).toString(16).padStart(2, '0')).join('');
 const bakes = {};
 // Hue (degrees), HSV saturation and value. Skin sits at roughly 0-30 degrees; the beige and grey clothes sit above that.
 function rgb2hsv(r, g, b) {
@@ -52,7 +56,8 @@ function rgb2hsv(r, g, b) {
   return [h * 60, d / mx, mx];
 }
 function bakeTexture(body, look, src) {
-  const key = `${body}:${look.skin}:${look.hair}:${look.eyes}`;
+  const covered = !!look.style && look.style !== 'original';   // a hairstyle shell hides the model's own hair
+  const key = `${body}:${look.skin}:${look.hair}:${look.eyes}:${covered ? 1 : 0}`;
   if (bakes[key]) return bakes[key];
   const img = src.image;
   const W = img.width || 1024, k = W / 1024;
@@ -60,14 +65,30 @@ function bakeTexture(body, look, src) {
   cv.width = W; cv.height = img.height || W;
   const ctx = cv.getContext('2d', { willReadFrequently: true });
   ctx.drawImage(img, 0, 0, cv.width, cv.height);
-  if (look.skin || look.hair !== 'brown') {
+  if (look.skin || look.hair !== 'brown' || covered) {
     const all = ctx.getImageData(0, 0, cv.width, cv.height), d = all.data;
+    // skin patches that carry baked hair paint (nape, behind the ears) get plain skin when a hairstyle covers them
+    let mask = null, avg = [0, 0, 0];
+    if (covered && NAPE[body]) {
+      const m = document.createElement('canvas'); m.width = cv.width; m.height = cv.height;
+      const mc = m.getContext('2d'); mc.fillStyle = '#fff'; mc.strokeStyle = '#fff'; mc.lineWidth = 2 * k;
+      const u = NAPE[body];
+      for (let i = 0; i < u.length; i += 6) { mc.beginPath(); mc.moveTo(u[i] * cv.width, u[i + 1] * cv.height); mc.lineTo(u[i + 2] * cv.width, u[i + 3] * cv.height); mc.lineTo(u[i + 4] * cv.width, u[i + 5] * cv.height); mc.closePath(); mc.fill(); mc.stroke(); }
+      mask = mc.getImageData(0, 0, cv.width, cv.height).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) { const [h, s, v] = rgb2hsv(d[i] / 255, d[i + 1] / 255, d[i + 2] / 255); if ((h <= 30 || h >= 345) && v > 0.55 && s > 0.2 && s < 0.5) { avg[0] += d[i]; avg[1] += d[i + 1]; avg[2] += d[i + 2]; n++; } }
+      if (n) avg = avg.map((c) => c / n); else avg = [224, 172, 142];
+    }
     const st = SKIN_TONES[look.skin], hc = HAIR_COLOURS[look.hair] ? new THREE.Color(HAIR_COLOURS[look.hair]) : null;
     for (let i = 0; i < d.length; i += 4) {
       const R = d[i] / 255, G = d[i + 1] / 255, B = d[i + 2] / 255;
       const [h, s, v] = rgb2hsv(R, G, B);
       const warm = h <= 30 || h >= 345;
       if (!warm) continue;                    // blue/grey/beige clothes, eyes and so on
+      if (mask && mask[i] > 128 && v > 0.08 && v <= 0.45 && s > 0.25) {   // baked hair paint on skin: paint skin instead
+        d[i] = Math.min(255, avg[0] * st[0]); d[i + 1] = Math.min(255, avg[1] * st[1]); d[i + 2] = Math.min(255, avg[2] * st[2]);
+        continue;
+      }
       if (v > 0.42 && s > 0.2 && look.skin) {   // skin
         d[i] = Math.min(255, d[i] * st[0]); d[i + 1] = Math.min(255, d[i + 1] * st[1]); d[i + 2] = Math.min(255, d[i + 2] * st[2]);
       } else if (v > 0.1 && v <= 0.42 && s > 0.3 && hc) {   // hair, brows, lashes
@@ -107,17 +128,21 @@ export function applyLook(group, look = {}) {
   const eyes = Object.hasOwn(EYE_COLOURS, look.eyes) ? look.eyes : 'brown';
   const hair = Object.hasOwn(HAIR_COLOURS, look.hair) ? look.hair : 'brown';
   const skin = Number.isInteger(look.skin) && look.skin >= 0 && look.skin < SKIN_TONES.length ? look.skin : 0;
-  const L = { eyes, hair, skin }, id = `${eyes}|${hair}|${skin}`;
+  const style = look.style || 'original';
+  const L = { eyes, hair, skin, style }, id = `${eyes}|${hair}|${skin}|${style === 'original' ? 0 : 1}`;
   const M = group.userData.model;
-  group.userData.lookWant = L;
-  if (!M || M.lookId === id) return;
+  group.userData.lookWant = { ...L, style, face: look.face };
+  if (!M) return;
+  applyHairStyle(M, style, HAIR_COLOURS[hair] || '#4a2f1d', skinHex(skin), factor);
+  applyFace(group, look.face);
+  if (M.lookId === id) return;
   M.lookId = id;
   M.root.traverse((o) => {
     if (!o.isMesh || !o.material) return;
     if (!o.userData.origMap) o.userData.origMap = o.material.map;
     const src = o.userData.origMap;
     if (!src || !src.image) return;
-    o.material.map = id === 'brown|brown|0' ? src : bakeTexture(M.body, L, src);
+    o.material.map = id === 'brown|brown|0|0' ? src : bakeTexture(M.body, L, src);
     o.material.needsUpdate = true;
   });
 }
@@ -151,8 +176,9 @@ export function attachModel(group, body = 'man') {
     const clip = THREE.AnimationClip.findByName(g.animations, name);
     if (clip) { actions[name] = mixer.clipAction(clip); actions[name].play(); actions[name].setEffectiveWeight(0); }
   }
+  const skinned = []; root.traverse((o) => { if (o.isSkinnedMesh) skinned.push(o); });
   const rig = captureRig(root);
-  group.userData.model = { root, mixer, actions, cur: 'idle', rig, bones: rig.bones, extras: [], heading: 0, b: 1, body, phase: Math.random() * 6 };
+  group.userData.model = { hairMesh: skinned.length > 1 ? skinned[1] : null, root, mixer, actions, cur: 'idle', rig, bones: rig.bones, extras: [], heading: 0, b: 1, body, phase: Math.random() * 6 };
   group.userData.lookKey = null; // dress again
   if (group.userData.lookWant) applyLook(group, group.userData.lookWant);
 }
@@ -175,18 +201,23 @@ export function dressModel(group, look, catalog) {
   for (const m of M.extras) { m.parent && m.parent.remove(m); m.geometry.dispose(); m.material.dispose(); }
   M.extras = [];
   if (!acc) return;
-  const k = 1 / (factor || 1);   // the bones live inside the scaled model, so sizes are given in model units
+  M.root.updateMatrixWorld(true);
   const put = (bone, mesh, x, y, z, rx = 0) => {
     const b = M.bones[bone];
     if (!b) return;
+    // The bones sit inside an armature that is scaled down (centimetres), so measure the real scale of this bone.
+    const k = (factor || 1) / (new THREE.Vector3().setFromMatrixScale(b.matrixWorld).x || 1);
     mesh.position.set(x * k, y * k, z * k);
     mesh.scale.setScalar(k);
     mesh.rotation.x = rx;
     b.add(mesh);
     M.extras.push(mesh);
   };
-  if (acc.kind === 'cap') put('Head', new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(acc.color)), 0, 0.1, 0.0);
-  else if (acc.kind === 'shades') put('Head', new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.035, 0.03), mat(acc.color)), 0, 0.06, 0.1);
+  if (acc.kind === 'cap') {
+    const g = new THREE.SphereGeometry(1, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2); g.scale(0.098, 0.105, 0.115);
+    put('Head', new THREE.Mesh(g, mat(acc.color)), 0, 0.165, 0.004, -0.06);
+  }
+  else if (acc.kind === 'shades') put('Head', new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.035, 0.03), mat(acc.color)), 0, 0.128, 0.118);
   else if (acc.kind === 'watch') put('LeftHand', new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.012, 8, 12), mat(acc.color)), 0, 0.02, 0);
   else if (acc.kind === 'bag') put('Spine', new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.26, 0.1), mat(acc.color)), 0.22, -0.05, 0.05);
   else if (acc.kind === 'chain') put('Spine', new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.014, 8, 16), mat(acc.color)), 0, 0.13, 0.1, Math.PI / 2.4);
@@ -243,4 +274,60 @@ export function animateModel(group, dt, speed, heading, working, t, sitting = fa
   // Reaching for a door handle (set by the street view while you are right at a door).
   const rw = group.userData.reach || 0;
   if (rw > 0.02) poseReach(M.rig, rw);
+}
+
+// ---- Face shape sliders -------------------------------------------------------------------------------------------
+// Each slider is a whole number from -3 to 3 (0 = the model's own face). They gently reshape the head mesh around
+// landmarks (nose tip, mouth, chin). Every person gets their own copy of the head geometry the first time it changes.
+export const FACE_KEYS = ['noseW', 'noseL', 'lipFull', 'mouthW', 'jawW', 'chinL', 'faceW'];
+const marks = {};
+function faceMarks(body, pos) {
+  if (marks[body]) return marks[body];
+  let miny = 1e9, maxy = -1e9;
+  for (let i = 1; i < pos.length; i += 3) { miny = Math.min(miny, pos[i]); maxy = Math.max(maxy, pos[i]); }
+  const H = maxy - miny; let nose = -1;
+  for (let i = 0; i < pos.length; i += 3) {
+    if ((pos[i + 1] - miny) / H > 0.86 && Math.abs(pos[i]) < 0.02 && (nose < 0 || pos[i + 2] > pos[nose + 2])) nose = i;
+  }
+  return (marks[body] = { ny: pos[nose + 1], nz: pos[nose + 2], H });
+}
+const g2 = (d, s) => Math.exp(-(d * d) / (s * s));
+export function applyFace(group, face) {
+  const M = group.userData.model;
+  if (!M) return;
+  const f = FACE_KEYS.map((_, i) => (Array.isArray(face) && Number.isInteger(face[i]) ? Math.max(-3, Math.min(3, face[i])) : 0));
+  const id = f.join(',');
+  group.userData.faceWant = f;
+  if (M.faceId === id || (M.faceId === undefined && !f.some(Boolean))) { M.faceId = id; return; }
+  M.faceId = id;
+  const [nW, nL, lF, mW, jW, cL, fW] = f;
+  M.root.traverse((o) => {
+    if (!o.isSkinnedMesh) return;
+    const geo = o.geometry;
+    if (!geo.userData.faceBase) {   // first change: take a private plain copy of the positions (the shared one may be interleaved)
+      const a = geo.attributes.position, flat = new Float32Array(a.count * 3);
+      for (let i = 0; i < a.count; i++) { flat[i * 3] = a.getX(i); flat[i * 3 + 1] = a.getY(i); flat[i * 3 + 2] = a.getZ(i); }
+      geo.userData.faceBase = { array: flat };
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(flat), 3));
+    }
+    const base = geo.userData.faceBase.array, out = geo.attributes.position.array;
+    const m = faceMarks(M.body, base), ny = m.ny, nz = m.nz;
+    const my = ny - 0.032, cy = ny - 0.075;
+    for (let i = 0; i < base.length; i += 3) {
+      let x = base[i], y = base[i + 1], z = base[i + 2];
+      const dy = y - ny;
+      if (dy > -0.16 && dy < 0.2 && z > nz - 0.13) {   // only the head's face side; the neck and the back are left alone
+        const front = Math.max(0, Math.min(1, (z - (nz - 0.13)) / 0.1));
+        if (nW) { const w = g2(dy + 0.012, 0.028) * g2(x, 0.032) * front; x *= 1 + 0.22 * nW / 3 * w; }
+        if (nL) { const w = g2(dy + 0.004, 0.022) * g2(x, 0.02) * front; z += 0.016 * nL / 3 * w; y -= 0.003 * nL / 3 * w; }
+        if (lF) { const w = g2(y - my, 0.013) * g2(x, 0.034) * front; z += 0.005 * lF / 3 * w; y = my + (y - my) * (1 + 0.45 * lF / 3 * w); }
+        if (mW) { const w = g2(y - my, 0.014) * g2(x, 0.05) * front; x *= 1 + 0.24 * mW / 3 * w; }
+        if (jW) { const w = g2(y - (my - 0.018), 0.034) * Math.min(1, Math.abs(x) / 0.03) * front; x *= 1 + 0.15 * jW / 3 * w; }
+        if (cL) { const w = g2(y - cy, 0.024) * g2(x, 0.045) * front; y -= 0.02 * cL / 3 * w; z += 0.004 * cL / 3 * w; }
+      }
+      if (fW) { const w = Math.max(0, Math.min(1, (dy + 0.1) / 0.06)) * Math.max(0, Math.min(1, (0.2 - dy) / 0.08)); x *= 1 + 0.05 * fW / 3 * w; }
+      out[i] = x; out[i + 1] = y; out[i + 2] = z;
+    }
+    geo.attributes.position.needsUpdate = true;
+  });
 }

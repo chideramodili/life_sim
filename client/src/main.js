@@ -23,7 +23,7 @@ import { createCabin, makeWorldBus } from './cabin.js';
 import { initBank } from './bankUi.js';
 import { initHome } from './homeUi.js';
 import { initFashion } from './fashionUi.js';
-import { makeVehicle } from './vehicles.js';
+import { makeVehicle, loadCar, carReady, carClone, spinWheels } from './vehicles.js';
 import { dressAvatar } from './outfit.js';
 import { initPhoto } from './photo.js';
 import { createCity } from './street.js';
@@ -178,6 +178,7 @@ function buildRoom(info) {
     street = null;
   }
   decor.clear();
+  doorAnims.length = 0;
   scene.fog = null;
   if (info.city) {
     // The outdoor hub: a long road with a building and a door for every place.
@@ -205,7 +206,41 @@ function buildRoom(info) {
     const exitSign = textSprite('Exit', '#ffffff', 256, 96, 56);
     exitSign.scale.set(2.4, 0.9, 1);
     exitSign.position.set(info.exit.x, 3.7, info.exit.z + 0.3);
-    decor.add(frame, inner, exitSign);
+    // The door leaf: hinged on one side, swings into the room when anyone walks up to it.
+    const hinge = new THREE.Group();
+    hinge.position.set(info.exit.x - 1.2, 0, info.exit.z + 0.1);
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.8, 0.1), new THREE.MeshStandardMaterial({ color: '#2a2433', roughness: 0.35, metalness: 0.2 }));
+    leaf.position.set(1.2, 1.4, 0);
+    const knob = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.2), new THREE.MeshStandardMaterial({ color: '#d8d8e0', metalness: 0.8, roughness: 0.3 }));
+    knob.position.set(2.05, 1.3, 0);
+    hinge.add(leaf, knob);
+    decor.add(frame, inner, exitSign, hinge);
+    doorAnims.push({ hinge, x: info.exit.x, z: info.exit.z - 1, reach: 2.6, sign: 1, open: 0 });
+  }
+  if (info.id === 'home' || info.id === 'friendhome') {
+    // The front gate of the plot (pillars are at x = -1.7 and 1.7, z = 13): two gold leaves that swing inward.
+    for (const s of [-1, 1]) {
+      const hinge = new THREE.Group();
+      hinge.position.set(s * 1.55, 0, 13);
+      const bars = new THREE.Group();
+      const gold = new THREE.MeshStandardMaterial({ color: '#c9a227', metalness: 0.6, roughness: 0.4 });
+      const frameTop = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.08, 0.08), gold); frameTop.position.set(-s * 0.75, 1.5, 0);
+      const frameLow = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.08, 0.08), gold); frameLow.position.set(-s * 0.75, 0.4, 0);
+      bars.add(frameTop, frameLow);
+      for (let i = 0; i < 6; i++) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.2, 0.05), gold); b.position.set(-s * (0.12 + i * 0.25), 0.95, 0); bars.add(b); }
+      hinge.add(bars);
+      decor.add(hinge);
+      doorAnims.push({ hinge, x: 0, z: 13, reach: 3.2, sign: -s, open: 0 });
+    }
+  }
+}
+const doorAnims = []; // hinged doors in the current room: { hinge, x, z, reach, sign, open }
+function updateDoors(dt) {
+  for (const d of doorAnims) {
+    let near = false;
+    for (const a of avatars.values()) if (Math.hypot(a.group.position.x - d.x, a.group.position.z - d.z) < d.reach) { near = true; break; }
+    d.open += ((near ? 1 : 0) - d.open) * (1 - Math.exp(-dt * (near ? 5 : 3)));
+    d.hinge.rotation.y = d.sign * d.open * 1.6;
   }
 }
 
@@ -254,8 +289,9 @@ function clearAvatars() {
 }
 
 let travelTable = {};
-socket.on('welcome', ({ id, username, travel, needs, actions }) => {
+socket.on('welcome', ({ id, username, travel, needs, actions, needLook }) => {
   myId = id;
+  if (needLook) setTimeout(firstLook, 400);
   travelTable = travel;
   $('player').textContent = username;
   buildNeeds(needs, actions);
@@ -305,20 +341,21 @@ socket.on('state', ({ room, players, cars, lvl, cops, ph }) => {
       const grp = a.group; const bd = p.b ? 'woman' : 'man'; whenModelReady(() => attachModel(grp, bd));
     }
     a.target.set(p.x, 0, p.z);
-    if (p.id === myId) myLook = { body: p.b ? 'woman' : 'man', eyes: p.e || 'brown', skin: p.s || 0, hair: p.h || 'brown' };
+    if (p.id === myId) myLook = { body: p.b ? 'woman' : 'man', eyes: p.e || 'brown', skin: p.s || 0, hair: p.h || 'brown', style: p.y || 'original', face: p.f || null };
     { const bd = p.b ? 'woman' : 'man'; const gm = a.group.userData.model; if (gm && gm.body !== bd) attachModel(a.group, bd); }
-    applyLook(a.group, { eyes: p.e || 'brown', skin: p.s || 0, hair: p.h || 'brown' });
+    applyLook(a.group, { eyes: p.e || 'brown', skin: p.s || 0, hair: p.h || 'brown', style: p.y || 'original', face: p.f });
     a.group.userData.baseColor = p.color;
     dressAvatar(a.group, p.look, fashionCat);
     a.working = Boolean(p.work);
     a.sit = Boolean(p.sit);
+    a.lying = Boolean(p.lie);
     a.exercise = p.an || 0;
     // Riding: hide the person and show the vehicle they are in.
     if (p.ride) {
-      if (a.vehKind !== p.ride) {
+      if (a.vehKind !== p.ride || a.vehModel !== (p.rm || null)) {
         if (a.veh) scene.remove(a.veh);
-        a.veh = p.id === myId && (p.ride === 'bus' || p.ride === 'taxi' || p.ride === 'car') ? makeWorldBus(1 + (Date.now() % 997), p.ride) : makeVehicle(p.ride);
-        a.vehKind = p.ride;
+        a.veh = p.rm ? makeVehicle('car', p.rm) : p.id === myId && (p.ride === 'bus' || p.ride === 'taxi' || p.ride === 'car') ? makeWorldBus(1 + (Date.now() % 997), p.ride) : makeVehicle(p.ride);
+        a.vehKind = p.ride; a.vehModel = p.rm || null;
         a.veh.position.copy(a.group.position);
         a.veh.rotation.y = p.ry || 0;
         scene.add(a.veh);
@@ -328,7 +365,7 @@ socket.on('state', ({ room, players, cars, lvl, cops, ph }) => {
     } else if (a.veh) {
       scene.remove(a.veh);
       a.veh = null;
-      a.vehKind = null;
+      a.vehKind = null; a.vehModel = null;
       a.group.visible = true;
     }
   }
@@ -342,13 +379,14 @@ socket.on('state', ({ room, players, cars, lvl, cops, ph }) => {
 });
 
 // ---------- Driving ----------
-let meDriving = false;
+let meDriving = false, driveCockpit = null;
 function updateDrive(m) {
   const on = !!m.drive;
+  driveCockpit = on && m.drive.cockpit ? m.drive.cockpit : null;
   if (on !== meDriving) { meDriving = on; walkInput.setDriving(on); if (!on) setSeatView(false); }
   $('seatBtn').hidden = !on;
   const onStreet = currentRoom === 'street' && !m.trip && !m.jail;
-  const owns = Array.isArray(m.owns) && m.owns.some((k) => k === 'car' || k === 'bike' || (k && (k.kind === 'car' || k.kind === 'bike')));
+  const owns = Array.isArray(m.owns) && m.owns.length > 0;
   $('driveBtn').hidden = on || !onStreet || !owns;
   $('parkBtn').hidden = !on;
   $('speedo').hidden = !on;
@@ -362,6 +400,7 @@ $('parkBtn').onclick = () => socket.emit('drive', { on: false });
 
 loadModel();
 loadNpc();
+loadCar('police'); loadCar('taxi');
 if (location.search.includes('dumpSolids')) window.__interior = interior;
 if (location.search.includes('debug')) { window.__socket = socket; window.__three = { scene, camera, controls }; }
 
@@ -744,24 +783,25 @@ async function callApi(path, body) {
 }
 
 // The character is made in the editor: when creating an account, and later from the Look panel.
-let signupLook = { body: 'man', eyes: 'brown', skin: 0, hair: 'brown' };
-const lookText = (l) => `${l.body === 'woman' ? 'Woman' : 'Man'} · ${l.eyes[0].toUpperCase() + l.eyes.slice(1)} eyes · ${l.hair[0].toUpperCase() + l.hair.slice(1)} hair · Skin ${l.skin + 1}`;
-$('authCharSum').textContent = lookText(signupLook);
-$('authChar').addEventListener('click', () => openCreator({
-  title: 'Your character', initial: signupLook,
-  onSave: (l) => { signupLook = l; $('authCharSum').textContent = lookText(l); },
-}));
-let myLook = { body: 'man', eyes: 'brown', skin: 0, hair: 'brown' };
+let myLook = { body: 'man', eyes: 'brown', skin: 0, hair: 'brown', style: 'original' };
+// Editing later: the body (man or woman) is locked, because it was chosen when the account was made.
 $('lookEdit').addEventListener('click', () => openCreator({
-  title: 'Edit your character', initial: myLook,
+  title: 'Edit your character', initial: myLook, lockBody: true,
   onSave: (l) => { myLook = l; socket.emit('setLook', l); },
 }));
+// A brand-new account makes its character once, right after sign-up; it cannot be skipped.
+function firstLook() {
+  openCreator({
+    title: 'Create your character', initial: myLook, required: true,
+    onSave: (l) => { myLook = l; socket.emit('setLook', l); },
+  });
+}
 async function submitAuth(kind) {
   const username = $('user').value.trim();
   const password = $('pass').value;
   $('authError').textContent = '';
   try {
-    const { ok, data } = await callApi(`/api/${kind}`, kind === 'signup' ? { username, password, ...signupLook } : { username, password });
+    const { ok, data } = await callApi(`/api/${kind}`, { username, password });
     if (!ok) {
       $('authError').className = 'err';
       $('authError').textContent = data.error || 'Something went wrong. Try again.';
@@ -785,11 +825,10 @@ async function submitAuth(kind) {
 async function submitReset() {
   $('resetError').textContent = '';
   try {
-    const { ok, data } = await callApi('/api/reset', {
-      username: $('ruser').value.trim(),
-      recoveryCode: $('rcode').value.trim(),
-      newPassword: $('rpass').value,
-    });
+    const typed = $('rcode').value.trim();
+    const { ok, data } = /^\d{6}$/.test(typed)
+      ? await callApi('/api/reset-email/confirm', { who: $('ruser').value.trim(), code: typed, newPassword: $('rpass').value })
+      : await callApi('/api/reset', { username: $('ruser').value.trim(), recoveryCode: typed, newPassword: $('rpass').value });
     if (!ok) {
       $('resetError').textContent = data.error || 'Something went wrong. Try again.';
       return;
@@ -819,6 +858,41 @@ $('forgot').addEventListener('click', () => {
   $('reset').hidden = false;
 });
 $('resetBack').addEventListener('click', () => showAuth());
+$('rmail').addEventListener('click', async () => {
+  const who = $('ruser').value.trim();
+  $('resetError').className = 'err';
+  if (!who) { $('resetError').textContent = 'Type your username (or email) above first.'; return; }
+  try {
+    const { ok, data } = await callApi('/api/reset-email/request', { who });
+    $('resetError').className = ok ? 'err good' : 'err';
+    $('resetError').textContent = ok ? 'If that account has a confirmed email, a code is on its way. Type it below with your new password.' : (data.error || 'Something went wrong.');
+  } catch { $('resetError').textContent = 'Cannot reach the server. Is it running?'; }
+});
+// Menu: add an email to your account so you can reset a forgotten password by email.
+async function mailApi(path, body) {
+  const res = await fetch(`${SERVER}${path}`, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: body ? JSON.stringify(body) : undefined });
+  return { ok: res.ok, data: await res.json().catch(() => ({})) };
+}
+async function loadMail() {
+  if (!token) return;
+  try { const { ok, data } = await mailApi('/api/email'); if (ok) $('mailNow').textContent = data.email || 'none yet'; } catch { /* offline */ }
+}
+$('mailSend').addEventListener('click', async () => {
+  $('mailMsg').textContent = '';
+  try {
+    const { ok, data } = await mailApi('/api/email/add', { email: $('mailIn').value.trim() });
+    $('mailMsg').textContent = ok ? 'Code sent. Type it below.' : (data.error || 'Something went wrong.');
+    if (ok) { $('mailCode').hidden = false; $('mailVerify').hidden = false; }
+  } catch { $('mailMsg').textContent = 'Cannot reach the server.'; }
+});
+$('mailVerify').addEventListener('click', async () => {
+  try {
+    const { ok, data } = await mailApi('/api/email/verify', { code: $('mailCode').value.trim() });
+    $('mailMsg').textContent = ok ? 'Email confirmed.' : (data.error || 'Wrong code.');
+    if (ok) { $('mailNow').textContent = data.email; $('mailCode').hidden = true; $('mailVerify').hidden = true; $('mailCode').value = ''; }
+  } catch { $('mailMsg').textContent = 'Cannot reach the server.'; }
+});
+socket.on('welcome', () => loadMail());
 $('resetGo').addEventListener('click', submitReset);
 $('rpass').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') submitReset();
@@ -929,10 +1003,13 @@ function setSeatView(on) {
   camera.fov = on ? 70 : 45; camera.updateProjectionMatrix();
   seatLook = 0;
   document.body.classList.toggle('driverView', on);
-  if (!on) { if (me) { me.group.visible = !me.veh; if (me.veh) me.veh.visible = true; } snapCam = true; }
+  if (!on) { if (me) { me.group.visible = !me.veh; if (me.veh) me.veh.visible = true; } snapCam = true; dropCockpit(); }
   $('seatBtn').textContent = on ? '🧍 Outside view' : '🚗 Driver view';
   $('seatBtn').classList.toggle('on', on);
 }
+// Flashy cars have a real cockpit: the outside of the car is hidden and you sit inside the cockpit model.
+let cockpitObj = null, cockpitName = null;
+function dropCockpit() { if (cockpitObj) { scene.remove(cockpitObj); cockpitObj = null; cockpitName = null; } }
 function updateSeatView(dt) {
   const me = avatars.get(myId);
   if (!seatView || !me) return;
@@ -941,14 +1018,20 @@ function updateSeatView(dt) {
   if (me.veh) me.veh.visible = false;
   if (!seatDrag) seatLook *= Math.exp(-dt * 4); // your head drifts back to straight ahead
   const bike = me.vehKind === 'bike';
-  const eye = bike ? 1.35 : 1.15, fwd = bike ? 0.1 : 0.15;
+  let eye = bike ? 1.35 : 1.15, fwd = bike ? 0.1 : 0.15, side = 0;
   const yaw = (me.ry || 0) + seatLook;
   const p = me.group.position;
-  camera.position.set(p.x + Math.sin(me.ry || 0) * fwd, eye, p.z + Math.cos(me.ry || 0) * fwd);
+  if (driveCockpit) {
+    if (cockpitName !== driveCockpit) { dropCockpit(); loadCar(driveCockpit).then(() => { if (seatView && driveCockpit && !cockpitObj) { cockpitObj = carClone(driveCockpit); cockpitName = driveCockpit; if (cockpitObj) scene.add(cockpitObj); } }); cockpitName = driveCockpit; }
+    if (cockpitObj) { cockpitObj.position.copy(p); cockpitObj.rotation.y = me.ry || 0; eye = 0.95; fwd = -0.02; side = 0.37; }
+  }
+  const sr = Math.sin(me.ry || 0), cr = Math.cos(me.ry || 0);
+  camera.position.set(p.x + sr * fwd + cr * side, eye, p.z + cr * fwd - sr * side);
   controls.target.set(p.x + Math.sin(yaw) * 6, eye - 0.1, p.z + Math.cos(yaw) * 6);
   camera.lookAt(controls.target);
 }
 $('sitBtn').addEventListener('click', () => socket.emit('sit'));
+$('bedBtn').addEventListener('click', () => socket.emit('restBed'));
 let sitTick = 0;
 function updateSitButton(now) {
   if (now - sitTick < 250) return;
@@ -957,6 +1040,7 @@ function updateSitButton(now) {
   const can = Boolean(a && roomInfoNow && $('trip').hidden && !meDriving && !cabin.active && !a.working);
   $('sitBtn').hidden = !can;
   $('sitBtn').textContent = a && a.sit ? '🧍 Stand up' : '🪑 Sit';
+  { const inHosp = roomInfoNow && roomInfoNow.id === 'hospital'; $('bedBtn').hidden = !(can && inHosp && (a.lying || window.__sick)); $('bedBtn').textContent = a && a.lying ? '🧍 Get up' : '🛏 Rest in bed'; if (a && a.lying) $('sitBtn').hidden = true; }
 }
 $('seatBtn').addEventListener('click', () => setSeatView(!seatView));
 renderer.domElement.addEventListener('pointerdown', (e) => { if (seatView && !seatDrag) seatDrag = { x: e.clientX, id: e.pointerId }; });
@@ -1195,12 +1279,14 @@ renderer.setAnimationLoop(() => {
       animateModel(a.group, dt, a.speed, a.heading, a.working, tnow, a.sit && !a.veh, a.exercise || 0);
     }
     if (a.veh) {
+      { const dx = a.group.position.x - a.veh.position.x, dz = a.group.position.z - a.veh.position.z; const dd = Math.hypot(dx, dz); if (dd > 0.001 && dd < 5) spinWheels(a.veh, dd * (dx * Math.sin(a.veh.rotation.y) + dz * Math.cos(a.veh.rotation.y) >= 0 ? 1 : -1)); }
       a.veh.position.copy(a.group.position);
       let d = ((a.ry - a.veh.rotation.y + Math.PI * 3) % (Math.PI * 2)) - Math.PI; // shortest turn
       a.veh.rotation.y += d * Math.min(1, dt * 8);
     }
   }
   applyDaylight();
+  updateDoors(dt);
   interior.update(dt, world.daylight());
   if (street) { street.setPeople([...avatars.values()].filter((a) => a.group.visible).map((a) => a.group.position)); street.update(dt); }
   updateCops(dt, performance.now() / 1000);

@@ -4,9 +4,20 @@ import { isOpen } from './world.js';
 
 // ---------- Vehicles ----------
 // "travel" is what the Map offers once you own it. Walking is free and slow, the bus is cheap, taxis are quick but dear.
+// Every vehicle Kanis Motors sells. To add a car later: drop its model in client/public/models/cars/<model>.glb
+// and add one row here (and its model name in client/src/vehicles.js CAR_MODELS). Nothing else needs to change.
+// kind: 'car' or 'bike' (how it drives). speed: top speed and pickup compared with a normal car.
+// cockpit: name of a cockpit (inside) model, only for flashy cars. cost is in naira, based on what such a car costs in real life.
 export const VEHICLES = {
-  bike: { label: 'Bicycle',  cost: 25000,  travel: { cost: 0,   seconds: 5 }, text: 'Free to ride, faster than walking.' },
-  car:  { label: 'Used car', cost: 400000, travel: { cost: 150, seconds: 2 }, text: 'Quick, but fuel costs ₦150 a trip.' },
+  bike:       { kind: 'bike', tier: 'Everyday',  label: 'Bicycle',            cost: 25000,     speed: 1,    travel: { cost: 0,   seconds: 5 }, text: 'Free to ride, faster than walking.' },
+  car:        { kind: 'car',  tier: 'Everyday',  label: '1970s Coupe',        cost: 400000,    speed: 1,    model: 'coupe70',    travel: { cost: 150, seconds: 2 }, text: 'A cheap old coupe. Quick, but fuel costs ₦150 a trip.' },
+  taxi90:     { kind: 'car',  tier: 'Everyday',  label: '1990s Yellow Cab',   cost: 1200000,   speed: 1,    model: 'taxi90',     travel: { cost: 150, seconds: 2 }, text: 'An old city cab. Tough and cheap to keep.' },
+  pickup50:   { kind: 'car',  tier: 'Classic',   label: '1950s Pickup Truck', cost: 3500000,   speed: 0.9,  model: 'pickup50',   travel: { cost: 150, seconds: 2 }, text: 'A restored farm truck with real character.' },
+  roadster50: { kind: 'car',  tier: 'Classic',   label: '1950s Roadster',     cost: 6500000,   speed: 1.1,  model: 'roadster50', travel: { cost: 120, seconds: 2 }, text: 'A beautiful old-school open roadster.' },
+  taxi:       { kind: 'car',  tier: 'Premium',   label: 'City Taxi',          cost: 9000000,   speed: 1.15, model: 'taxi',       travel: { cost: 120, seconds: 2 }, text: 'A modern cab, comfortable and fast enough.' },
+  lowrider:   { kind: 'car',  tier: 'Premium',   label: 'Lowrider',           cost: 14000000,  speed: 1.2,  model: 'lowrider',   travel: { cost: 120, seconds: 2 }, text: 'Slung low, painted loud. Everybody looks.' },
+  sports:     { kind: 'car',  tier: 'Luxury',    label: 'Sports Car',         cost: 85000000,  speed: 1.5,  model: 'sports',     cockpit: 'sports_cockpit', travel: { cost: 100, seconds: 1 }, text: 'Fast and flashy, with a full cockpit view.' },
+  racer:      { kind: 'car',  tier: 'Supercar',  label: 'Race Car',           cost: 250000000, speed: 1.8,  model: 'racer',      travel: { cost: 100, seconds: 1 }, text: 'Built for speed. The fastest thing on the road.' },
 };
 export const VEHICLE_IDS = Object.keys(VEHICLES);
 export const parseVehicles = (json) => {
@@ -20,7 +31,7 @@ export const parseVehicles = (json) => {
 // The trip types this player can use right now.
 export const travelFor = (baseTravel, owned) => {
   const t = { ...baseTravel };
-  for (const id of owned) t[id] = { ...VEHICLES[id].travel };
+  for (const id of owned) t[VEHICLES[id].kind] = { ...VEHICLES[id].travel };
   return t;
 };
 

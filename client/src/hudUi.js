@@ -130,7 +130,7 @@ export function initHud(socket, look) {
   }
   hudEl.addEventListener('click', (e) => {
     const b = e.target.closest('button');
-    if (b && b.id !== 'logout' && !b.classList.contains('closeX')) setTimeout(() => toggleMenu(false), 0);
+    if (b && b.id !== 'logout' && !b.closest('#mailBox') && !b.classList.contains('closeX')) setTimeout(() => toggleMenu(false), 0);
   });
   setInterval(() => {
     menuDot.hidden = !['billsBadge', 'peopleBadge', 'friendsBadge'].some((id) => $(id) && !$(id).hidden);
