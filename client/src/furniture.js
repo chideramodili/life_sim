@@ -83,6 +83,18 @@ const BUILD = {
     if (c.tier >= 2) for (let i = 0; i < 3; i++) g.add(box(0.12, 0.3, 0.6, '#f2e6c9', -w / 2 + 0.5 + i * 0.5, 0.45, -0.1));
     return g;
   },
+  chair: (w, d, c) => {
+    const g = new THREE.Group();
+    const col = c.color || '#7a4f9a';
+    if (c.id === 'chair') {
+      g.add(box(w - 0.1, 0.1, d - 0.2, col, 0, 0.45, 0), box(0.1, 0.45, d - 0.2, shade(col, 0.8), -w / 2 + 0.15, 0, 0), box(0.1, 0.45, d - 0.2, shade(col, 0.8), w / 2 - 0.15, 0, 0));
+      return g;
+    }
+    g.add(box(w - 0.1, 0.45, d - 0.1, col, 0, 0, 0), box(w - 0.1, 0.55, 0.25, shade(col, 0.85), 0, 0.45, -d / 2 + 0.2), box(0.2, 0.3, d - 0.1, shade(col, 0.85), -w / 2 + 0.15, 0.45, 0), box(0.2, 0.3, d - 0.1, shade(col, 0.85), w / 2 - 0.15, 0.45, 0));
+    if (c.id === 'chair_sect') g.add(box(0.9, 0.45, 0.9, col, w / 2 - 0.5, 0, 0.9), box(0.2, 0.3, 0.9, shade(col, 0.85), w / 2 - 0.1, 0.45, 0.9));
+    if (c.tier >= 2) for (let i = 0; i < 3; i++) g.add(box(0.12, 0.3, 0.6, '#f2e6c9', -w / 2 + 0.5 + i * 0.5, 0.45, -0.1));
+    return g;
+  },
   rug: (w, d, c) => {
     const g = new THREE.Group();
     const col = c.color || '#c0583d';
