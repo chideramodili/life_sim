@@ -2,7 +2,7 @@
 // This file only turns that into simple 3D shapes. Only your own Home shows any of this.
 import * as THREE from 'three';
 
-const wood = '#8a5a35';
+const wood = '#1ea5bd';
 const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, ...extra });
 const box = (w, h, d, color, x = 0, y = 0, z = 0, extra) => {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color, extra));
@@ -85,14 +85,14 @@ const BUILD = {
   },
   chair: (w, d, c) => {
     const g = new THREE.Group();
-    const col = c.color || '#7a4f9a';
+    const col = c.color || '#e8e0d0';
     if (c.id === 'chair') {
-      g.add(box(w - 0.1, 0.1, d - 0.2, col, 0, 0.45, 0), box(0.1, 0.45, d - 0.2, shade(col, 0.8), -w / 2 + 0.15, 0, 0), box(0.1, 0.45, d - 0.2, shade(col, 0.8), w / 2 - 0.15, 0, 0));
-      return g;
+      const high = 0.8 + c.tier * 0.08;
+      g.add(box(w - 0.05, 0.4, d - 0.05, c.frame), box(w - 0.2, 0.3, d - 0.2, col, 0.05, 0.4, 0), box(0.5, 0.15, Math.min(d - 0.5, 1.2), '#ffffff', -w / 2 + 0.45, 0.7, 0), box(0.14, high, d - 0.05, shade(c.frame, 1.15), -w / 2 + 0.07, 0, 0));
+      if (d > 1.5) g.add(box(0.5, 0.15, 0.7, '#ffffff', -w / 2 + 0.45, 0.7, 0.6), box(w - 0.3, 0.06, d - 0.3, shade(col, 1.25), 0.1, 0.7, 0));
+    } else {
+      g.add(box(w - 0.1, c.tier === 0 ? 0.12 : 0.3 + c.tier * 0.03, d - 0.1, col, 0, 0.02, 0), box(0.5, 0.12, d - 0.4, '#ffffff', -w / 2 + 0.45, 0.35, 0));
     }
-    g.add(box(w - 0.1, 0.45, d - 0.1, col, 0, 0, 0), box(w - 0.1, 0.55, 0.25, shade(col, 0.85), 0, 0.45, -d / 2 + 0.2), box(0.2, 0.3, d - 0.1, shade(col, 0.85), -w / 2 + 0.15, 0.45, 0), box(0.2, 0.3, d - 0.1, shade(col, 0.85), w / 2 - 0.15, 0.45, 0));
-    if (c.id === 'chair_sect') g.add(box(0.9, 0.45, 0.9, col, w / 2 - 0.5, 0, 0.9), box(0.2, 0.3, 0.9, shade(col, 0.85), w / 2 - 0.1, 0.45, 0.9));
-    if (c.tier >= 2) for (let i = 0; i < 3; i++) g.add(box(0.12, 0.3, 0.6, '#f2e6c9', -w / 2 + 0.5 + i * 0.5, 0.45, -0.1));
     return g;
   },
   rug: (w, d, c) => {
