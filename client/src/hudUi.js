@@ -36,8 +36,8 @@ export const APPS = [
   { id: 'photos', label: 'Camera', icon: '📷', bg: 'linear-gradient(145deg,#6f7787,#3b4150)', click: 'photoBtn', need: 'This phone has no camera. Buy one with a camera at the Shop.' },
   { id: 'games', label: 'Games', icon: '🎮', bg: 'linear-gradient(145deg,#2fcf9a,#0d7f64)', isNew: true, say: 'Stand next to another player, then tap 🎮 Play.' },
   { id: 'wall', label: 'Wallpaper', icon: '🖼️', bg: 'linear-gradient(145deg,#6fa8ff,#7a5cff)', wall: true },
-  { id: 'radio', label: 'Radio', icon: '📻', bg: 'linear-gradient(145deg,#ff7a6b,#d6343d)', isNew: true, soon: true, say: 'Radio is coming soon.' },
-  { id: 'audiomack', label: 'Audiomack', icon: '🎵', bg: 'linear-gradient(145deg,#ffb52e,#d9801a)', soon: true, say: 'Music apps are coming soon.' },
+  { id: 'radio', label: 'Radio', icon: '📻', bg: 'linear-gradient(145deg,#ff7a6b,#d6343d)', isNew: true, click: 'radioBtn', force: true },
+  { id: 'audiomack', label: 'Audiomack', icon: '🎵', bg: 'linear-gradient(145deg,#ffb52e,#d9801a)', isNew: true, click: 'amBtn', force: true },
   { id: 'spotify', label: 'Spotify', icon: '🎧', bg: 'linear-gradient(145deg,#4fd37c,#1a8f4a)', soon: true, say: 'Music apps are coming soon.' },
   { id: 'apple', label: 'Apple Music', icon: '🎶', bg: 'linear-gradient(145deg,#ff6b8a,#c9264f)', soon: true, say: 'Music apps are coming soon.' },
 ];

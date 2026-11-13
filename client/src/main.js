@@ -9,8 +9,8 @@ import { initLook } from './settingsUi.js';
 import { initWorld } from './worldUi.js';
 import { initLife } from './lifeUi.js';
 import { initSocial } from './socialUi.js';
-import { loadModel, whenModelReady, attachModel, animateModel, applyLook } from './model.js';
-import { decodeLook2 } from './person2.js';
+import { loadModel, whenModelReady, attachModel, animateModel, applyLook, detachModel } from './model.js';
+import { decodeLook2, DEFAULT_LOOK2 } from './person2.js';
 import { openCreator } from './creator.js';
 import { loadNpc } from './npc.js';
 import { initRadio } from './radio.js';
@@ -26,6 +26,7 @@ import { createCabin, makeWorldBus } from './cabin.js';
 import { initBank } from './bankUi.js';
 import { initHome } from './homeUi.js';
 import { initFashion } from './fashionUi.js';
+import { setPicGender } from './shopPics.js';
 import { makeVehicle, loadCar, carReady, carClone, spinWheels } from './vehicles.js';
 import { dressAvatar } from './outfit.js';
 import { initPhoto } from './photo.js';
@@ -127,7 +128,7 @@ const NIGHT_BG = new THREE.Color('#070a24');
 const NIGHT_SUN = new THREE.Color('#8fa8ff');
 const DAY_SUN = new THREE.Color('#ffffff');
 function applyDaylight() {
-  let d = world.daylight();
+  let d = typeof window.__forceDaylight === 'number' ? window.__forceDaylight : world.daylight();   // (the override is for testing)
   if (currentRoom === 'home' && world.noPower()) d = Math.min(d, furniture.hasLamp() ? 0.3 : 0.05); // lights out (a lamp helps a little)
   else if ((currentRoom === 'home' || currentRoom === 'friendhome') && !furniture.lightsOn()) d = Math.min(d, 0.12); // the light switch is off
   d = Math.round(d * 100) / 100;
@@ -162,6 +163,57 @@ function textSprite(text, color, width, height, fontPx) {
   g.textBaseline = 'middle';
   g.fillText(text, width / 2, height / 2 + 4);
   return new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true }));
+}
+
+// ---------- Loading / warm-up ----------
+// The first time a place is drawn, the phone has to compile its shaders and upload textures, which freezes the game for a few
+// seconds. Do that behind a loading screen instead: build the place, compile everything for the real scene, then reveal it.
+const loadingEl = $('loading');
+let loadingTimer = null, warmedAvatars = false;
+const warmedPlaces = new Set();
+function loadStep(text, pct) { $('ldText').textContent = text; $('ldFill').style.width = pct + '%'; }
+function showLoading(text = 'Getting your world ready…') {
+  clearTimeout(loadingTimer);
+  loadingEl.hidden = false; loadingEl.classList.remove('out');
+  loadStep(text, 8);
+  loadingTimer = setTimeout(hideLoading, 14000);   // never trap the player behind it
+}
+function hideLoading() {
+  clearTimeout(loadingTimer);
+  if (loadingEl.hidden) return;
+  loadingEl.classList.add('out');
+  setTimeout(() => { if (loadingEl.classList.contains('out')) loadingEl.hidden = true; }, 450);
+}
+const nextFrames = (n) => new Promise((res) => { const f = () => (n-- <= 0 ? res() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+async function compileScene() {
+  try { if (renderer.compileAsync) await renderer.compileAsync(scene, camera); else renderer.compile(scene, camera); } catch { try { renderer.compile(scene, camera); } catch { /* the first frame will compile instead */ } }
+}
+// Put a man and a woman into the real scene for a moment so their shaders (skin, hair, clothes) are ready too.
+async function warmAvatars() {
+  if (warmedAvatars) return; warmedAvatars = true;
+  await new Promise((res) => whenModelReady(res));
+  const tmp = [];
+  for (const g of ['m', 'f']) {
+    const grp = new THREE.Group(); grp.position.set(0, -40, 0); scene.add(grp);
+    attachModel(grp, null, { ...DEFAULT_LOOK2, g, hs: g === 'f' ? 'long' : 'parted', bd: g === 'm' ? 'beard' : 'none' });
+    applyLook(grp, { v2: { ...DEFAULT_LOOK2, g, hs: g === 'f' ? 'long' : 'parted', bd: g === 'm' ? 'beard' : 'none' } });
+    tmp.push(grp);
+  }
+  await new Promise((r) => setTimeout(r, 350));   // hair is fetched on demand
+  await compileScene();
+  for (const grp of tmp) { detachModel(grp); scene.remove(grp); }
+}
+async function warmUpPlace(key) {
+  if (warmedPlaces.has(key) && warmedAvatars) { hideLoading(); return; }
+  loadStep('Preparing the place…', 40);
+  await nextFrames(1);
+  await compileScene();
+  loadStep('Getting the people ready…', 70);
+  await warmAvatars();
+  loadStep('Almost there…', 95);
+  await nextFrames(2);
+  warmedPlaces.add(key);
+  hideLoading();
 }
 
 // Build the ground, four corner pillars, and a name sign for a room.
@@ -313,7 +365,11 @@ socket.on('room', (info) => {
   if (cabin.active && !cabinBusy) { wantCabin = null; leaveCabin(); }
   currentRoom = info.id;
   clearAvatars();
+  const placeKey = info.city ? 'city:' + (info.cityId || 'lagos') : info.id;
+  const firstTime = !warmedPlaces.has(placeKey) || !warmedAvatars;
+  if (firstTime) showLoading(info.city ? 'Building the city…' : 'Getting your world ready…');
   buildRoom(info);
+  if (firstTime) setTimeout(() => warmUpPlace(placeKey), 0);
   furniture.show(info.id === 'home' || info.id === 'friendhome');
   if (info.id === 'friendhome') { if (visitData) furniture.set(visitData); }
   else { visitData = null; if (ownHome) furniture.set(ownHome); }
@@ -347,7 +403,7 @@ socket.on('state', ({ room, players, cars, lvl, cops, ph }) => {
     }
     a.target.set(p.x, 0, p.z);
     const v2 = p.v2 ? decodeLook2(p.v2) : null;
-    if (p.id === myId && v2) myLook = v2;
+    if (p.id === myId && v2) { myLook = v2; setPicGender(v2.g); }
     { const bd = p.b ? 'woman' : 'man'; const gm = a.group.userData.model; if (gm && (gm.body !== bd || (v2 && (!gm.p2 || gm.p2.g !== v2.g)) || (!v2 && gm.p2))) attachModel(a.group, bd, v2); }
     applyLook(a.group, v2 ? { v2 } : { eyes: p.e || 'brown', skin: p.s || 0, hair: p.h || 'brown', style: p.y || 'original', face: p.f });
     a.group.userData.baseColor = p.color;
@@ -728,6 +784,7 @@ function startSession(t) {
   token = t;
   sessionStorage.setItem(TOKEN_KEY, token);
   for (const p of AUTH_PAGES) $(p).hidden = true;
+  showLoading('Logging you in…');
   socket.connect();
 }
 
@@ -1174,7 +1231,25 @@ function followMe(dt) {
   if (snapCam && roomInfoNow.city) {
     const p = me.group.position;
     controls.target.set(p.x, 0, p.z);
-    camera.position.set(p.x, 38, p.z + 25);
+    // Stand the camera where the line of sight to you is clear. Arriving at a tower door (the Grand Hotel) used to put the camera
+    // inside or right against the building. Try the usual spot (south), then north, east, west and the diagonals, and raise the
+    // camera if everything is walled in.
+    const bl = roomInfoNow.city.buildings || [];
+    const hits = (ox, oz, hgt) => {   // how many buildings the camera ray crosses below the ray's own height
+      let n = 0;
+      for (let d = 3; d <= 25; d += 2) {
+        const x = p.x + ox * d / 25, z = p.z + oz * d / 25, ry = hgt * d / 25;
+        for (const b of bl) if (b.k !== 'stall' && b.h > ry - 1 && Math.abs(x - b.x) < b.w / 2 + 1.2 && Math.abs(z - b.z) < b.d / 2 + 1.2) { n++; break; }
+      }
+      return n;
+    };
+    const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7]];
+    let best = null;
+    for (const hgt of [38, 62]) {
+      for (const [dx, dz] of dirs) { const n = hits(dx * 25, dz * 25, hgt); if (!best || n < best.n) best = { n, dx, dz, hgt }; if (n === 0) break; }
+      if (best.n === 0) break;
+    }
+    camera.position.set(p.x + best.dx * 25, best.hgt, p.z + best.dz * 25);
     controls.maxDistance = 160;
     snapCam = false;
   }

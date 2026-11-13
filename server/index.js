@@ -47,7 +47,7 @@ import {
   garnish, addScore,
 } from './bank.js';
 import {
-  parseWardrobe, wardrobeInfo, fashionCatalog, publicLook, charmBonus, compliment, COMPLIMENT_COOLDOWN_MS, outfitOf, scentOf,
+  CLOTHES, parseWardrobe, wardrobeInfo, fashionCatalog, publicLook, charmBonus, compliment, COMPLIMENT_COOLDOWN_MS, outfitOf, scentOf,
   buyClothes, sellClothes, wear, takeOff, buyPerfume, sellPerfume, spritz, tickScent,
 } from './fashion.js';
 import { homeSolids, parseHome, homeInfo, effectsOf, buyItem, sellItem, placeItem, putAway, paint, setLights } from './home.js';
@@ -2699,6 +2699,7 @@ io.on('connection', (socket) => {
     const why = fashionGate(p, true);
     if (why) return notice(p, why);
     if (!req || typeof req !== 'object') return;
+    if (req.kind === 'clothes' && CLOTHES[req.id] && CLOTHES[req.id].slot === 'dress' && !(p.look2 && p.look2.g === 'f')) return notice(p, 'Dresses are only sold in the women\'s range for now.');
     if (req.kind === 'clothes') fashionApply(p, buyClothes(p.wardrobe, p.cash, req.id));
     else if (req.kind === 'perfume') fashionApply(p, buyPerfume(p.wardrobe, p.cash, req.id));
   });
@@ -2712,6 +2713,7 @@ io.on('connection', (socket) => {
   socket.on('wear', (id) => {
     const why = fashionGate(p, false);
     if (why) return notice(p, why);
+    if (CLOTHES[id] && CLOTHES[id].slot === 'dress' && !(p.look2 && p.look2.g === 'f')) return notice(p, 'That dress is cut for the women\'s body.');
     fashionApply(p, wear(p.wardrobe, id));
   });
   socket.on('takeOff', (slot) => {

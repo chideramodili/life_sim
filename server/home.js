@@ -102,7 +102,9 @@ export const GROUPS = {
     ['bidet',        'Bidet',                    60000,  { style: 4, max: 1, glb: 'bidet' }],
     ['hot_tub',      'Wooden hot tub',           650000, { style: 24, max: 1, glb: 'hot-tub', size: [3, 3] }],
   ] },
-  decor: { label: 'Decor and storage', size: [1, 1], cap: 10, items: [
+  decor: { label: 'Decor and storage', size: [1, 1], cap: 12, items: [
+    ['gift_box',     'Wrapped gift box',         5000,   { style: 2, max: 4, glb: 'gift-box' }],
+    ['snowman',      'Snowman',                  18000,  { style: 5, max: 1, glb: 'snowman', size: [2, 2] }],
     ['curtains',     'Green curtains',           22000,  { style: 5, max: 2, glb: 'curtains', size: [2, 1], lift: 0.5 }],
     ['door',         'Interior door',            30000,  { style: 3, max: 2, glb: 'door' }],
     ['xmas_tree',    'Christmas tree',           38000,  { style: 7, max: 1, glb: 'christmas-tree', size: [2, 2] }],
@@ -110,7 +112,9 @@ export const GROUPS = {
     ['wardrobe',     'Old painted wardrobe',     85000,  { style: 8, max: 2, glb: 'old-wardrobe', size: [2, 1] }],
     ['patio_set',    'Patio table and chairs',   130000, { style: 11, max: 1, glb: 'patio-set', size: [2, 2] }],
   ] },
-  pro: { label: 'Shop and clinic', size: [1, 1], cap: 6, items: [
+  pro: { label: 'Shop and clinic', size: [1, 1], cap: 8, items: [
+    ['shop_basket',  'Shopping basket',          3500,   { style: 1, max: 4, glb: 'shopping-basket' }],
+    ['shop_cart',    'Shopping trolley',         28000,  { style: 3, max: 2, glb: 'shopping-cart' }],
     ['grocery_shelf', 'Grocery shelf',           70000,  { style: 4, max: 2, glb: 'grocery-shelf', size: [2, 1] }],
     ['reception',    'Curved reception desk',    150000, { style: 8, max: 1, glb: 'reception-desk', size: [2, 1] }],
     ['op_table',     'Operating table',          400000, { style: 6, max: 1, glb: 'operating-table', size: [2, 2] }],

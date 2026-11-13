@@ -49,7 +49,9 @@ export function loadPerson2() {
   return loadingBodies;
 }
 export const person2Ready = () => !!(bodies.m && bodies.f);
-function loadHair(file) { return (hairs[file] ||= loader.loadAsync(DIR + file).catch(() => null)); }
+let hairPending = 0;
+function loadHair(file) { if (!hairs[file]) { hairPending++; hairs[file] = loader.loadAsync(DIR + file).catch(() => null).finally(() => { hairPending--; }); } return hairs[file]; }
+export const p2Pending = () => hairPending + garmentLoads;
 
 // old bone -> new bone. "aim" is the child used to read the bone's direction; bones without one borrow the turn of the bone before them.
 const MAP = [
@@ -117,7 +119,116 @@ export function attach2(group, M, look) {
   for (const e of pairs) { e.n.quaternion.copy(e.cur.copy(e.aligned)); }
   // (the quaternions above are in the root frame; the first retarget call turns them into local ones)
   retarget2(group);
+  captureRest(group, M.p2);
   return true;
+}
+
+// ---- Garments (dresses, boots): real clothing models skinned onto the body --------------------------------------------
+// At the moment the body is in its rest pose we remember where every body vertex is, so that a garment (made for a different
+// mannequin) can be placed, pushed out of the skin, and given the skin weights of the body surface nearest to each of its points.
+function captureRest(group, p) {
+  group.updateWorldMatrix(true, true);
+  const body = p.body, bones = body.skeleton.bones, n = body.geometry.attributes.position.count;
+  const toP = new THREE.Matrix4().copy(p.P.matrixWorld).invert().multiply(body.matrixWorld);
+  const pos = new Float32Array(n * 3), v = new THREE.Vector3();
+  for (let i = 0; i < n; i++) { body.getVertexPosition(i, v).applyMatrix4(toP); pos[i * 3] = v.x; pos[i * 3 + 1] = v.y; pos[i * 3 + 2] = v.z; }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(body.geometry.index); g.computeVertexNormals();
+  const grid = new Map(), CELL = 0.03, key = (a, b, c) => (a + 200) + (b + 200) * 1000 + (c + 200) * 1000000;
+  for (let i = 0; i < n; i++) { const k = key(Math.floor(pos[i * 3] / CELL), Math.floor(pos[i * 3 + 1] / CELL), Math.floor(pos[i * 3 + 2] / CELL)); (grid.get(k) || grid.set(k, []).get(k)).push(i); }
+  p.rest = { P: p.P.matrixWorld.clone(), inv: bones.map((b) => b.matrixWorld.clone().invert()), pos, nor: g.attributes.normal.array, grid, CELL, key, pelvis: bones.findIndex((b) => b.name === 'pelvis') };
+  g.dispose();
+}
+
+// Each garment: file in /models/garments, k = size, x/y/z = shift in metres (body frame), loose = how much a skirt follows the hips instead of each leg.
+export const GARMENTS = {
+  d_red: { file: 'dress_red', k: 1, y: 0, z: 0, loose: 0.8, w: 1.15, d: 1.1 },
+  d_kimono: { file: 'dress_kimono', k: 1, y: 0, z: 0, loose: 0.6, w: 1.1, d: 1.1 },
+  d_blazer: { file: 'dress_blazer', k: 1, y: 0, z: 0, loose: 0.7, arm: 20, w: 1.15, d: 1.1 },
+  d_velvet: { file: 'dress_velvet', k: 1, y: 0, z: 0, loose: 0.5, w: 1.15, d: 1.1 },
+};
+const garSrc = {}, garGeo = {};
+export let garmentLoads = 0;
+function loadGarment(file) {
+  if (garSrc[file]) return garSrc[file];
+  garmentLoads++;
+  return (garSrc[file] = new GLTFLoader().loadAsync(`/models/garments/${file}.glb`).then((g) => { let m = null; g.scene.traverse((o) => { if (o.isMesh && !m) m = o; }); return m; }).catch(() => null).finally(() => { garmentLoads--; }));
+}
+function fitGarment(p, def, src) {
+  const ck = p.g + def.file + [def.k, def.x, def.y, def.z, def.arm, def.w, def.d].join(',');
+  if (garGeo[ck]) return garGeo[ck];
+  const R = p.rest, sp = src.geometry.attributes.position, n = sp.count;
+  const pos = new Float32Array(n * 3), idx = new Uint16Array(n * 4), wt = new Float32Array(n * 4);
+  const bi = p.body.geometry.attributes.skinIndex, bw = p.body.geometry.attributes.skinWeight;
+  const k = 0.01 * (def.k || 1);
+  src.geometry.computeBoundingBox();
+  const cxm = (src.geometry.boundingBox.min.x + src.geometry.boundingBox.max.x) / 2;
+  for (let i = 0; i < n; i++) {
+    let x = (sp.getX(i) - cxm) * k * (def.w || 1) + (def.x || 0), y = sp.getY(i) * k + (def.y || 0), z = sp.getZ(i) * k * (def.d || 1) + (def.z || 0);
+    if (def.arm) {   // the garment was cut with arms held out; the body's arms hang down, so turn the sleeves in about the shoulder
+      const ax = Math.abs(x), t = Math.min(1, Math.max(0, (ax - 0.14) / 0.1)), tt = t * t * (3 - 2 * t);
+      if (tt > 0) {
+        const a = (x > 0 ? -1 : 1) * def.arm * Math.PI / 180 * tt, sx = x > 0 ? 0.19 : -0.19, sy = 1.43;
+        const rx = x - sx, ry = y - sy, c = Math.cos(a), sn = Math.sin(a);
+        x = sx + rx * c - ry * sn; y = sy + rx * sn + ry * c;
+      }
+    }
+    // nearest body vertex
+    let best = -1, bd = 1e9;
+    const cx = Math.floor(x / R.CELL), cy = Math.floor(y / R.CELL), cz = Math.floor(z / R.CELL);
+    for (let r = 1; r <= 6 && best < 0; r++) {
+      for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) for (let c = -r; c <= r; c++) {
+        const l = R.grid.get(R.key(cx + a, cy + b, cz + c)); if (!l) continue;
+        for (const j of l) { const dx = R.pos[j * 3] - x, dy = R.pos[j * 3 + 1] - y, dz = R.pos[j * 3 + 2] - z, d = dx * dx + dy * dy + dz * dz; if (d < bd) { bd = d; best = j; } }
+      }
+    }
+    if (best < 0) { best = 0; }
+    // push out of the skin
+    const nx = R.nor[best * 3], ny = R.nor[best * 3 + 1], nz = R.nor[best * 3 + 2];
+    const dist = (x - R.pos[best * 3]) * nx + (y - R.pos[best * 3 + 1]) * ny + (z - R.pos[best * 3 + 2]) * nz;
+    if (dist < 0.007 && bd < 0.04) { const o = 0.007 - dist; x += nx * o; y += ny * o; z += nz * o; }
+    pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+    // skin weights
+    const m = new Map();
+    for (let c = 0; c < 4; c++) { const gc = ['getX', 'getY', 'getZ', 'getW'][c], w = bw[gc](best); if (w > 0) m.set(bi[gc](best), w); }
+    if (y < 0.82 && def.loose && R.pelvis >= 0) {   // a skirt below the crotch follows the hips more than the individual legs
+      const b = def.loose, t = Math.min(1, (0.82 - y) / 0.1) * b;
+      for (const [j, w] of m) m.set(j, w * (1 - t));
+      m.set(R.pelvis, (m.get(R.pelvis) || 0) + t);
+    }
+    const top = [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4); let sum = 0; for (const e of top) sum += e[1];
+    for (let c = 0; c < 4; c++) { idx[i * 4 + c] = top[c] ? top[c][0] : 0; wt[i * 4 + c] = top[c] ? top[c][1] / (sum || 1) : 0; }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', src.geometry.attributes.normal);
+  geo.setAttribute('uv', src.geometry.attributes.uv);
+  geo.setAttribute('skinIndex', new THREE.BufferAttribute(idx, 4));
+  geo.setAttribute('skinWeight', new THREE.BufferAttribute(wt, 4));
+  geo.setIndex(src.geometry.index);
+  return (garGeo[ck] = geo);
+}
+// Put on (or take off) the worn garments: { dress: 'd_red' | null, boots: 's_cowboy' | null }. A dress hides the shirt and shorts, boots hide the shoes.
+export function setGarments(group, want) {
+  const M = group.userData.model, p = M && M.p2;
+  if (!p || !p.rest) return;
+  const wantDress = want && want.dress && GARMENTS[want.dress] && p.g === 'f' ? want.dress : null;
+  const wantBoots = want && want.boots && GARMENTS[want.boots] ? want.boots : null;
+  p.hide = { top: !!wantDress, bottom: !!wantDress, shoes: !!wantBoots };
+  for (const sh of p.shells) if (p.hide[sh.kind] !== undefined) sh.mesh.visible = !p.hide[sh.kind];
+  for (const [id, idKey, meshKey] of [[wantDress, 'dressId', 'dressMesh'], [wantBoots, 'bootId', 'bootMesh']]) {
+    if (p[idKey] === id) continue;
+    p[idKey] = id;
+    if (p[meshKey]) { p[meshKey].removeFromParent(); p[meshKey].material.dispose(); p[meshKey] = null; }
+    if (!id) continue;
+    const def = (window.__garm && window.__garm[id]) || GARMENTS[id];
+    loadGarment(def.file).then((src) => {
+      if (!src || M.p2 !== p || p[idKey] !== id) return;
+      const mesh = new THREE.SkinnedMesh(fitGarment(p, def, src), new THREE.MeshStandardMaterial({ map: src.material.map, roughness: 0.8, metalness: 0, side: THREE.DoubleSide }));
+      mesh.frustumCulled = false;
+      mesh.bind(new THREE.Skeleton(p.body.skeleton.bones, p.rest.inv), p.rest.P);
+      p.P.add(mesh); p[meshKey] = mesh;
+    });
+  }
 }
 
 export function detach2(group) {
@@ -266,5 +377,6 @@ export function applyLook2(group, look, cloth) {
       p.shells.push((sh = { kind, mesh }));
     }
     sh.mesh.material.color.set(cl[kind]);
+    if (p.hide && p.hide[kind] !== undefined) sh.mesh.visible = !p.hide[kind];
   }
 }

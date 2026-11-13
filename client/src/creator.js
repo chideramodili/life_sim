@@ -3,6 +3,7 @@
 // Categories with `parts` need separate head and hair pieces from Blender; until those arrive they show a "coming" note.
 import * as THREE from 'three';
 import { dressModel, loadModel, whenModelReady, attachModel, applyLook, animateModel } from './model.js';
+import { hairPic, paintPic } from './shopPics.js';
 import { SKIN2, EYES2, HAIRCOL2, HAIRSTYLES2, BEARDS2, DEFAULT_LOOK2, cleanLook2 } from './person2.js';
 
 const EYE_DOT = { brown: '#5a3a22', hazel: '#9a7b2f', green: '#3f8f4f', blue: '#3a7bd5', grey: '#8d9aa6', amber: '#c9822b' };
@@ -153,6 +154,7 @@ export function openCreator(opts) {
       b.type = 'button'; b.className = 'crOpt' + (look[cat] === o.v ? ' on' : ''); b.dataset.v = String(o.v); b.title = o.text;
       if (o.dot) { b.classList.add('dotOpt'); const d = document.createElement('span'); d.style.background = o.dot; b.append(d); }
       else b.innerHTML = `<span class="crBig">${o.icon}</span><em>${o.text}</em>`;
+      if (cat === 'hs') { const big = b.querySelector('.crBig'); hairPic(o.v, look.hc, look.g, (u) => { if (u && b.isConnected) { big.textContent = ''; big.style.cssText = `display:block;width:100%;height:54px;background:url(${u}) center/contain no-repeat;`; } }); }
       b.setAttribute('aria-label', o.text);
       b.addEventListener('click', () => change({ [cat]: o.v }));
       grid.append(b);

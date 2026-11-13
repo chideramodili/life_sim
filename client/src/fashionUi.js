@@ -1,5 +1,6 @@
 // Adulthood: the Boutique and the Wardrobe. The server owns the truth (what you own, prices, limits). This file only shows it and sends requests.
 import { hideOtherPanels } from './panels.js';
+import { itemPic, paintPic } from './shopPics.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -97,6 +98,7 @@ export function initFashion(socket, hooks = {}) {
       const pic = el('div', 'catPic');
       if (e.swatch) pic.style.background = `radial-gradient(circle at 50% 55%, ${e.swatch}, rgba(0,0,0,0.25))`;
       pic.append(el('span', 'catFallback', e.glyph), el('span', 'catStars', '★'.repeat(e.stars)));
+      if (e.kind === 'clothes') itemPic(cat.byId[e.id], (u) => paintPic(pic, u));
       if (e.have) pic.append(el('span', 'catOwned', 'Owned'));
       card.append(pic, el('div', 'catName', e.name), el('div', 'catPrice', naira(e.cost)), el('div', 'catTag', `${e.tag} · ${e.tierLabel}`));
       card.addEventListener('click', () => {
@@ -189,6 +191,7 @@ export function initFashion(socket, hooks = {}) {
         const pic = el('div', 'catPic');
         pic.style.background = `radial-gradient(circle at 50% 55%, ${c.color}, rgba(0,0,0,0.25))`;
         pic.append(el('span', 'catFallback', WGLYPH[c.slot] || '👕'));
+        itemPic(c, (u) => paintPic(pic, u));
         if (on) pic.append(el('span', 'catOwned', 'Wearing'));
         card.append(pic, el('div', 'catName', c.name), el('div', 'catPrice', c.brand), el('div', 'catTag', on ? 'Tap to take off' : c.tierLabel));
         card.addEventListener('click', () => socket.emit(on ? 'takeOff' : 'wear', on ? c.slot : id));

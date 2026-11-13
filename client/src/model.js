@@ -8,7 +8,7 @@ import { CLOTH } from './clothmask.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { applyHairStyle } from './hair.js';
-import { attach2, detach2, retarget2, applyLook2, loadPerson2, person2Ready } from './person2.js';
+import { p2Pending, setGarments, attach2, detach2, retarget2, applyLook2, loadPerson2, person2Ready } from './person2.js';
 import { captureRig, poseWork, poseStand, poseSit, poseExercise, exerciseTilt, poseReach, turn, fitForward } from './rig.js';
 
 const BODIES = ['man', 'woman'];
@@ -223,10 +223,10 @@ export function attachModel(group, body = 'man', look2 = null) {
   if (group.userData.lookWant) applyLook(group, group.userData.lookWant);
 }
 
-function detachModel(group) {
+export function detachModel(group) {
   const M = group.userData.model;
   if (!M) return;
-  for (const m of M.extras) { m.parent && m.parent.remove(m); m.geometry.dispose(); m.material.dispose(); }
+  for (const m of M.extras) freeExtra(m);
   if (M.p2) detach2(group);
   group.remove(M.root);
   M.root.traverse((o) => { if (o.isMesh) o.material.dispose(); });
@@ -235,6 +235,35 @@ function detachModel(group) {
 
 // Worn accessories (the Boutique's cap, shades, watch, bag and chain) are small pieces on the right bones.
 // The outfit colours themselves cannot repaint the painted-in clothes yet; that needs separate clothing pieces.
+// Real accessory models (public/models/acc). x/y/z are in metres on the Head bone, s scales it, ry turns it (radians), rx tilts it.
+const ACC_GLB = {
+  a_pirate: { file: 'hat_pirate', y: 0.118, z: 0.0, s: 1, ry: 0 },
+  a_straw: { file: 'hat_straw', y: 0.118, z: 0.0, s: 1, ry: 0 },
+  a_tophat: { file: 'hat_top', y: 0.125, z: 0.0, s: 1, ry: 0 },
+  a_aviator: { file: 'shades_aviator', y: 0.075, z: 0.09, s: 1, ry: 0 },
+};
+const accCache = {};
+let accPending = 0;
+export const modelBusy = () => accPending + p2Pending() > 0;
+function loadAcc(file, cb) {
+  const hit = accCache[file];
+  if (hit && hit.scene) return cb(hit.scene);
+  if (hit) return hit.waiters.push(cb);
+  accCache[file] = { waiters: [cb] };
+  accPending++;
+  new GLTFLoader().loadAsync(`/models/acc/${file}.glb`).then((g) => {
+    accCache[file].scene = g.scene;
+    for (const f of accCache[file].waiters) f(g.scene);
+    accCache[file].waiters = [];
+  }).catch(() => {}).finally(() => { accPending--; });
+}
+function freeExtra(m) {
+  m.parent && m.parent.remove(m);
+  if (m.userData.shared) return;   // copies of a cached model share its geometry and materials
+  if (m.geometry) m.geometry.dispose();
+  if (m.material) m.material.dispose();
+}
+
 export function dressModel(group, look, catalog) {
   const M = group.userData.model;
   if (!M) return;
@@ -247,8 +276,10 @@ export function dressModel(group, look, catalog) {
     M.lookId = null;   // rebake with the new colours
     if (group.userData.lookWant) applyLook(group, group.userData.lookWant);
   }
-  for (const m of M.extras) { m.parent && m.parent.remove(m); m.geometry.dispose(); m.material.dispose(); }
+  for (const m of M.extras) freeExtra(m);
   M.extras = [];
+  M.accWant = null;
+  setGarments(group, { dress: worn[4] ? worn[4].id : null, boots: worn[2] && worn[2].kind === 'boots' ? worn[2].id : null });
   if (!acc) return;
   M.root.updateMatrixWorld(true);
   const put = (bone, mesh, x, y, z, rx = 0) => {
@@ -263,6 +294,19 @@ export function dressModel(group, look, catalog) {
     M.extras.push(mesh);
   };
   if (!acc) return;
+  const gdef = ACC_GLB[acc.id];
+  if (gdef) {
+    const want = acc.id; M.accWant = want;
+    loadAcc(gdef.file, (scene) => {
+      const cur = group.userData.model;
+      if (cur !== M || M.accWant !== want) return;
+      const holder = new THREE.Group(); holder.userData.shared = true;
+      const copy = scene.clone(true); copy.scale.setScalar(gdef.s); holder.add(copy);
+      put('Head', holder, 0, gdef.y, gdef.z, gdef.rx || 0);
+      holder.rotation.y = gdef.ry || 0;
+    });
+    return;
+  }
   if (acc.kind === 'cap') {
     const g = new THREE.SphereGeometry(1, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2); g.scale(0.098, 0.105, 0.115);
     put('Head', new THREE.Mesh(g, mat(acc.color)), 0, 0.165, 0.004, -0.06);

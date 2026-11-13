@@ -43,6 +43,12 @@ export function dressAvatar(group, look, catalog) {
     if (acc.kind === 'cap') {
       m = new THREE.Mesh(new THREE.SphereGeometry(0.32, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), mat(acc.color));
       m.position.y = 1.36;
+    } else if (acc.kind === 'hat') {
+      m = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.04, 20), mat(acc.color));
+      m.position.y = 1.36;
+      const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.2, 16), mat(acc.color));
+      crown.position.y = 1.46;
+      add(crown);
     } else if (acc.kind === 'shades') {
       m = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.1), mat(acc.color));
       m.position.set(0, 1.33, 0.27);

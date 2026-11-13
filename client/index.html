@@ -58,6 +58,14 @@ button { font: inherit; cursor: pointer; }
 .finesHead { font-weight: 700; margin-bottom: 6px; } .finesWarn { color: #ff9b8a; margin-bottom: 6px; } .finesNote { opacity: .75; margin-top: 6px; font-size: 13px; }
 .finesAll { margin-top: 6px; padding: 7px 14px; border: 0; border-radius: 8px; background: var(--hi); color: var(--on-hi); font: inherit; cursor: pointer; }
 body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !important; }
+#loading { position: fixed; inset: 0; z-index: 31; background: radial-gradient(circle at 50% 40%, #3a2459, #170d28); display: flex; align-items: center; justify-content: center; transition: opacity .4s ease; }
+#loading[hidden] { display: none; }
+#loading.out { opacity: 0; pointer-events: none; }
+.ldBox { text-align: center; color: #fff; width: min(260px, 70vw); }
+.ldLogo { letter-spacing: .22em; font-weight: 800; font-size: 20px; color: #ffcf5c; margin-bottom: 14px; }
+#ldText { font-size: 13px; opacity: .85; margin-bottom: 12px; }
+.ldBar { height: 5px; border-radius: 3px; background: rgba(255,255,255,.18); overflow: hidden; }
+.ldBar i { display: block; height: 100%; width: 8%; background: linear-gradient(90deg, #ff7a4d, #ffcf5c); transition: width .35s ease; }
 #fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 30; transition: opacity .45s ease; }
 #cabinHint { position: fixed; left: 50%; transform: translateX(-50%); bottom: 90px; z-index: 6; padding: 8px 14px; border-radius: 16px; background: rgba(20,18,30,.75); color: #fff; font-size: 13px; pointer-events: none; }
 #bizBtn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 190px; z-index: 6; padding: 11px 20px; border: 0; border-radius: 22px; background: #3ddc97; color: #10261c; font: inherit; font-weight: 700; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
@@ -242,6 +250,27 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     .padRow { display: flex; justify-content: center; gap: 8px; margin-top: 6px; }
     .padRow .mini { min-width: 84px; height: 36px; }
     .decoItem { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 8px 10px; margin-top: 6px; border: 0.5px solid var(--line); border-radius: 8px; background: transparent; color: var(--text); font-size: calc(13px * var(--fs)); }
+
+    /* The music "dynamic island": a small pill at the top with a spinning disc and the name of what is playing. */
+    #island { position: fixed; top: 56px; left: 50%; transform: translateX(-50%) scale(0.8); opacity: 0; pointer-events: none; z-index: 6; display: flex; align-items: center; gap: 8px; max-width: min(250px, calc(100vw - 130px)); padding: 4px 6px 4px 5px; border-radius: 999px; background: rgba(8,8,12,0.82); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.35), inset 0 0 0 0.5px rgba(255,255,255,0.18); transition: opacity .25s, transform .25s; }
+    #island.on { opacity: 1; transform: translateX(-50%) scale(1); pointer-events: auto; }
+    #island .disc { flex: none; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 50% 50%, #e8e8ee 0 11%, #d33a6b 12% 30%, #15151a 31% 36%, #2b2b34 37% 52%, #15151a 53% 60%, #2b2b34 61% 100%); box-shadow: 0 0 0 1px rgba(255,255,255,0.15); animation: islandSpin 2.4s linear infinite; }
+    #island .disc::after { content: ''; display: block; width: 100%; height: 100%; border-radius: 50%; background: conic-gradient(from 20deg, transparent 0 40deg, rgba(255,255,255,0.28) 55deg, transparent 80deg 200deg, rgba(255,255,255,0.2) 225deg, transparent 250deg); }
+    @keyframes islandSpin { to { transform: rotate(360deg); } }
+    #island .nm { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; font-size: 12px; font-weight: 600; -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
+    #island .nm span { display: inline-block; padding-right: 24px; }
+    #island .nm span.run { animation: islandRun 9s linear infinite; }
+    @keyframes islandRun { 0%, 12% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
+    #island .bars { display: flex; gap: 2px; align-items: flex-end; height: 12px; flex: none; }
+    #island .bars i { width: 2px; background: #6ee7a8; border-radius: 1px; animation: islandBar 0.9s ease-in-out infinite; }
+    #island .bars i:nth-child(2) { animation-delay: .2s; } #island .bars i:nth-child(3) { animation-delay: .45s; }
+    @keyframes islandBar { 0%, 100% { height: 3px; } 50% { height: 12px; } }
+    #island button { flex: none; border: 0; background: rgba(255,255,255,0.14); color: #fff; width: 22px; height: 22px; border-radius: 50%; font-size: 11px; line-height: 1; padding: 0; cursor: pointer; }
+    @media (prefers-reduced-motion: reduce) { #island .disc, #island .bars i, #island .nm span.run { animation: none; } }
+    #decoPanel.moving > :not(#decoMove):not(.sheetHead) { display: none !important; }
+    #decoPanel.moving { max-height: none !important; overflow: visible !important; background: color-mix(in srgb, var(--bg) 62%, transparent) !important; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); padding-bottom: 8px; }
+    #decoPanel.moving .sheetHead { margin-bottom: 0; }
+    #decoPanel:not(.moving) #decoDone { display: none; }
     .decoItem.on { border-color: var(--accent); background: var(--bg2); }
     #decoPanel .mini:disabled, #storePanel .mini:disabled, #decoPanel .swatch:disabled { opacity: 0.55; cursor: default; }
     #friendsPanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
@@ -277,7 +306,11 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     #photoModal button { height: 42px; padding: 0 18px; border: 0; border-radius: 10px; font-weight: 600; background: var(--hi); color: var(--on-hi); }
     #doorBtn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 96px; z-index: 6; height: 46px; padding: 0 22px; border: 0; border-radius: 23px; font-weight: 700; background: var(--hi); color: var(--on-hi); box-shadow: 0 4px 16px rgba(0,0,0,0.4); }
     #doorBtn[hidden] { display: none; }
-    #radioPanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
+    #amPanel, #radioPanel { bottom: 70px; right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
+    #amPanel { right: 12px; width: min(360px, calc(100vw - 24px)); box-sizing: border-box; z-index: 7; max-height: 72vh; overflow-y: auto; }
+    .radioChips { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 8px; scrollbar-width: none; }
+    .radioChips button { flex: none; border: 1px solid var(--line); background: transparent; color: inherit; border-radius: 999px; padding: 5px 11px; font-size: 12px; }
+    .radioChips button.on { background: var(--accent, #ff7a4d); color: #1a1030; border-color: transparent; font-weight: 600; }
     .radioSoon { display: flex; gap: 8px; margin-top: 10px; }
     .radioTile { flex: 1; border: 1px dashed var(--line); border-radius: 10px; padding: 8px 4px; text-align: center; color: var(--muted); display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
     .radioTile span { font-size: 10px; letter-spacing: .1em; }
@@ -328,7 +361,6 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
       <button id="lookBtn">Look</button>
       <button id="billsBtn">Bills<span id="billsBadge" hidden></span></button>
       <button id="skillsBtn">Skills</button>
-      <button id="radioBtn">Radio</button>
       <button id="peopleBtn">People<span id="peopleBadge" hidden></span></button>
       <button id="friendsBtn">Friends<span id="friendsBadge" hidden>0</span></button>
     </div>
@@ -480,12 +512,18 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     </div>
   </div>
 
+  <button id="radioBtn" hidden aria-hidden="true" tabindex="-1">Radio</button>
+  <button id="amBtn" hidden aria-hidden="true" tabindex="-1">Audiomack</button>
+  <div id="amPanel" class="panel" hidden>
+    <div class="sheetHead"><span>Audiomack</span><button id="amClose" class="closeX" aria-label="Close Audiomack">×</button></div>
+    <div id="amBody"></div>
+  </div>
   <div id="radioPanel" class="panel" hidden>
     <div class="sheetHead"><span>Radio</span><button id="radioClose" class="closeX" aria-label="Close radio">×</button></div>
     <div id="radioNow" class="fine"></div>
     <label class="fine" style="display:flex;gap:8px;align-items:center;margin:6px 0;">Volume <input id="radioVol" type="range" min="0" max="100" step="1" style="flex:1"></label>
     <div id="radioBody"></div>
-    <div class="fine">Built-in stations are made live in your browser, so they are free to use. Spotify and Apple Music are coming later.</div>
+    <div class="fine">Generated stations are made live in your browser. Live stations are public internet radio streams and play from their own broadcasters. Spotify and Apple Music are coming later.</div>
   </div>
 
   <div id="laptopPanel" class="panel" hidden>
@@ -565,6 +603,8 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     <div class="fine">Tap a category to see everything in it, from basic to luxury. Better pieces cost more and do more. Buy here, then place it in your Home. The store buys things back at half price. Open 09:00 to 19:00.</div>
   </div>
 
+  <div id="island" aria-live="polite"><div class="disc"></div><div class="nm"><span></span></div><div class="bars"><i></i><i></i><i></i></div><button id="islandStop" aria-label="Stop music" type="button">■</button></div>
+
   <div id="decoPanel" class="panel" hidden>
     <div class="sheetHead"><span>Decorate</span><button id="decoClose" class="closeX" aria-label="Close decorate">×</button></div>
     <div id="decoHere" class="modeWhy no" hidden>Go to your Home to move things around.</div>
@@ -580,6 +620,7 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
         <div class="padRow"><button id="decoFront" class="mini">▼ Front</button></div>
       </div>
       <button id="decoAway" class="mini billPay">Put it away</button>
+      <button id="decoDone" class="mini hot billPay">Done</button>
     </div>
     <div class="bankSec">
       <div class="skillName">Paint</div>
@@ -657,6 +698,7 @@ body.seated #joy, body.seated #fpvBtn, body.seated #doorBtn { display: none !imp
     <div id="cityBody"></div>
   </div>
   <div id="fade"></div>
+  <div id="loading" hidden><div class="ldBox"><div class="ldLogo">ADULTHOOD</div><div id="ldText">Getting your world ready…</div><div class="ldBar"><i id="ldFill"></i></div></div></div>
   <div id="cabinHint" hidden>💺 You are in your seat · drag to look around</div>
   <div id="interviewPanel" class="panel" hidden>
     <div class="mapHead"><span>Job interview</span><button id="interviewClose" class="closeX" aria-label="Close">×</button></div>

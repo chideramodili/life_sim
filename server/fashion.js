@@ -7,8 +7,8 @@
 export const SELL_BACK = 0.5;     // the Boutique buys things back at half price, so buying and selling is never a way to make money
 export const MAX_CLOTHES = 40;
 export const MAX_BOTTLES = 6;
-export const SLOTS = ['top', 'bottom', 'shoes', 'acc'];
-export const SLOT_LABELS = { top: 'Tops', bottom: 'Bottoms', shoes: 'Shoes', acc: 'Accessories' };
+export const SLOTS = ['top', 'bottom', 'shoes', 'acc', 'dress'];
+export const SLOT_LABELS = { top: 'Tops', bottom: 'Bottoms', shoes: 'Shoes', acc: 'Accessories', dress: 'Dresses' };
 export const TIER_NAMES = ['Everyday', 'Smart', 'Premium', 'Designer', 'Couture'];
 
 // Brands, from the street to the runway.
@@ -61,14 +61,24 @@ const CLOTHES_TABLE = {
   acc: [
     ['a_cap',     'Cap',                          'danfo',   2000,    0, '#c0392b', 'cap'],
     ['a_shades',  'Sunglasses',                   'eko',     5000,    0, '#111111', 'shades'],
+    ['a_straw',   'Straw sun hat',                'eko',     12000,   0, '#d9b45b', 'hat'],
     ['a_watch',   'Steel watch',                  'zuri',    30000,   1, '#c0c6cc', 'watch'],
+    ['a_aviator', 'Aviator sunglasses',           'ada',     35000,   1, '#2a2a2a', 'shades'],
     ['a_bag',     'Leather bag',                  'ada',     40000,   1, '#6b3a24', 'bag'],
+    ['a_pirate',  'Pirate captain hat',           'danfo',   60000,   1, '#2b2118', 'hat'],
     ['a_chain',   'Gold-plated chain',            'oluwa',   80000,   2, '#d4af37', 'chain'],
     ['a_dshades', 'Designer sunglasses',          'adaeze',  200000,  3, '#0b0b0b', 'shades'],
+    ['a_tophat',  'Silk top hat',                 'atelier', 350000,  3, '#101010', 'hat'],
     ['a_gwatch',  'Gold watch',                   'atelier', 450000,  3, '#e6c35c', 'watch'],
     ['a_diamond', 'Diamond-set watch',            'osagie',  1500000, 4, '#e8f4ff', 'watch'],
   ],
 };
+CLOTHES_TABLE.dress = [   // women only
+  ['d_blazer', 'Blazer dress',                  'zuri',    55000,   1, '#a01818'],
+  ['d_red',    'Black ruched evening dress',    'oluwa',   140000,  2, '#1a1a1a'],
+  ['d_velvet', 'Velvet crop top and skirt',     'adaeze',  320000,  3, '#7a1428'],
+  ['d_kimono', 'Embroidered kimono gown',       'osagie',  900000,  4, '#e8e0d8'],
+];
 export const CLOTHES = {};
 for (const slot of SLOTS) {
   for (const [id, name, brand, cost, tier, color, kind] of CLOTHES_TABLE[slot]) {
@@ -163,7 +173,7 @@ export function compliment(w, rand = Math.random) {
 export const COMPLIMENT_COOLDOWN_MS = 12 * 60 * 1000;
 
 // ---------- State ----------
-export const defaultWardrobe = () => ({ owned: [], worn: { top: null, bottom: null, shoes: null, acc: null }, bottles: [], n: 1, scentId: null, scentLeft: 0, comp: {} });
+export const defaultWardrobe = () => ({ owned: [], worn: { top: null, bottom: null, shoes: null, acc: null, dress: null }, bottles: [], n: 1, scentId: null, scentLeft: 0, comp: {} });
 const isInt = (v) => Number.isInteger(v);
 const has = (o, k) => typeof k === 'string' && Object.hasOwn(o, k);
 
@@ -286,7 +296,7 @@ export function tickScent(w, realMin) {
   return false;
 }
 
-// Other players see your outfit. This is the short public form: the four ids you are wearing (or null if nothing).
+// Other players see your outfit. This is the short public form: the five ids you are wearing (or null if nothing).
 export function publicLook(w) {
   const l = SLOTS.map((s) => w.worn[s]);
   return l.some(Boolean) ? l : null;

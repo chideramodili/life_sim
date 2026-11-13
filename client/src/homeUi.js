@@ -26,7 +26,7 @@ export function initHome(socket, hooks = {}) {
   // ----- Home Store -----
   // A slide-up catalogue: category chips, a price filter, and cards in three columns. Tap a card, then Buy.
   // "Pick several" lets you tick a few cards and buy them together. The server still checks every single purchase.
-  const TAGS = { bed: 'Sleep', tv: 'Fun', fridge: 'Food', desk: 'Study', cool: 'Cool', sofa: 'Comfort', rug: 'Style', art: 'Style', lamp: 'Light', plant: 'Calm', shelf: 'Style' };
+  const TAGS = { bed: 'Sleep', tv: 'Fun', fridge: 'Food', desk: 'Study', cool: 'Cool', sofa: 'Comfort', rug: 'Style', art: 'Style', lamp: 'Light', plant: 'Calm', shelf: 'Style', seat: 'Comfort', bath: 'Bathroom', decor: 'Style', pro: 'Style' };
   const PRICES = [['any', 'Any price', () => true], ['low', 'Under ₦50,000', (c) => c.cost < 50000], ['mid', '₦50,000 to ₦150,000', (c) => c.cost >= 50000 && c.cost <= 150000], ['high', 'Over ₦150,000', (c) => c.cost > 150000]];
   const view = { group: 'all', q: '', price: 'any', multi: false, picked: new Set(), searchOpen: false };
   const stars = (c) => 1 + Math.round((c.tier / Math.max(1, c.tiers - 1)) * 2);
@@ -96,7 +96,7 @@ export function initHome(socket, hooks = {}) {
       const card = el('button', `catCard${view.picked.has(c.id) ? ' on' : ''}${blocked ? ' off' : ''}`);
       card.dataset.id = c.id;
       const pic = el('div', 'catPic');
-      const url = thumbFor(c);
+      const url = c.glb ? `/models/furniture/${c.glb}.png` : thumbFor(c);
       if (url) { const im = el('img'); im.src = url; im.alt = c.label; pic.append(im); } else pic.append(el('span', 'catFallback', '🛋️'));
       pic.append(el('span', 'catSize', `${c.size[0]}×${c.size[1]}`), el('span', 'catStars', '★'.repeat(stars(c))));
       if (owned) pic.append(el('span', 'catOwned', `Own ${owned}`));
@@ -194,6 +194,10 @@ export function initHome(socket, hooks = {}) {
       }
     }
 
+    // While a placed piece is selected only the move buttons stay, so the room is visible while you place it.
+    const sel = info.items.find((i) => i.uid === selected);
+    $('decoPanel').classList.toggle('moving', !!(sel && sel.placed && here));
+
     // Paint swatches
     const psig = JSON.stringify([info.wall, info.floor, info.walls, info.floors, here]);
     if (psig !== paintSig) {
@@ -228,6 +232,12 @@ export function initHome(socket, hooks = {}) {
   $('decoAway').addEventListener('click', () => {
     const it = cur();
     if (it) socket.emit('homeAway', it.uid);
+  });
+  $('decoDone').addEventListener('click', () => {
+    selected = null;
+    if (hooks.onSelect) hooks.onSelect(null);
+    decoSig = '';
+    paintDeco();
   });
   $('decoBack').addEventListener('click', () => nudge(0, -1));
   $('decoFront').addEventListener('click', () => nudge(0, 1));
