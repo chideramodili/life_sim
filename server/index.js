@@ -3801,9 +3801,5 @@ setInterval(() => {
 }, CLOCK_TICK_MS);
 
 httpServer.listen(PORT, '0.0.0.0', () => {
-<<<<<<< HEAD
   console.log(`Game server running on http://localhost:${PORT}`);
-=======
-  console.log(`Game server running on port ${PORT}`);
->>>>>>> 1750539 (Build and apply Update 82 client assets)
 });
