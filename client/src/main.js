@@ -42,7 +42,7 @@ import { BRAND, renderLogo } from './brand.js';
 
 // Where the game server lives. While developing it is port 3001 on the same computer.
 // In the built game the server also serves the page, so it is the same address.
-const SERVER = import.meta.env.VITE_SERVER_URL || (import.meta.env.DEV ? `http://${location.hostname}:3001` : location.origin);
+const SERVER = import.meta.env.VITE_SERVER_URL || (import.meta.env.DEV ? `http://${location.hostname}:8080` : location.origin);
 
 // The login token is kept per browser tab, so you can log in as a different player in each tab
 // while testing. To keep players logged in after closing the tab, switch this to localStorage.
