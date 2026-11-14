@@ -93,4 +93,4 @@ export function paintPic(box, url) {
   box.style.backgroundSize = 'cover'; box.style.backgroundPosition = 'center';
   const fb = box.querySelector('.catFallback'); if (fb) fb.style.display = 'none';
 }
-if (typeof location !== 'undefined' && location.search.includes('debug')) window.__pics = { itemPic, hairPic, setPicGender };
+if (typeof location !== 'undefined' && location.search.includes('debug')) window.__pics = { itemPic, hairPic, setPicGender, clear: () => cache.clear() };

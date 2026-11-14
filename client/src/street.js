@@ -74,8 +74,8 @@ const FACADES = {
   bigbox:    { wall: '#c9c4b8', win: '#35495f', style: 'shopfront', cols: 6, rows: 1 },
 };
 
-function facadeMaps(kind, seed) {
-  const f = FACADES[kind];
+function facadeMaps(kind, seed, walls) {
+  const f = walls && walls[kind] ? { ...FACADES[kind], wall: walls[kind] } : FACADES[kind];
   const W = 256, H = 128;
   const r = rnd(seed);
   const lit = [];
@@ -245,7 +245,7 @@ export function createCity(info) {
     }
   }
   for (const [kind, list] of Object.entries(byKind)) {
-    const maps = facadeMaps(kind, kind.length * 31);
+    const maps = facadeMaps(kind, kind.length * 31, LOOK.walls);
     disposables.push(maps.wall, maps.glow);
     const mat = standard({ map: maps.wall, emissiveMap: maps.glow, emissive: '#ffd88a', emissiveIntensity: 0, roughness: 0.85 });
     winMats.push(mat);
@@ -310,6 +310,35 @@ export function createCity(info) {
         add(new THREE.ConeGeometry(7, 5, 10), flat('#1c1c20'), x + 13, 2.5, z + 4);
         add(new THREE.ConeGeometry(5, 3.6, 9), flat('#25252a'), x + 19, 1.8, z - 3);
       }
+    }
+    if (lm.has('billboards')) {   // Lagos: big advertising boards on poles along the sidewalks
+      const ads = [['#e63946', '#ffffff', 'FRESH JUICE'], ['#1d3557', '#ffd166', 'NAIJA TELECOM'], ['#2a9d8f', '#ffffff', 'ISLAND BANK'], ['#ff7f11', '#1b1b1b', 'JOLLOF KING'], ['#6a4c93', '#ffffff', 'ADULTHOOD']];
+      const pole = standard({ color: '#4a4d55', metalness: 0.5, roughness: 0.6 });
+      let n = 0;
+      for (const side of [-1, 1]) for (let x = -city.bx + 40; x < city.bx - 30; x += 74 + side * 9) {
+        const [bg, fg, text] = ads[n++ % ads.length];
+        const tex = canvasTex(256, 128, (g, w, h) => { g.fillStyle = bg; g.fillRect(0, 0, w, h); g.fillStyle = fg; g.font = 'bold 34px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, w / 2, h / 2); g.fillRect(12, h - 18, w - 24, 4); });
+        disposables.push(tex);
+        const z = side * 9.6;
+        add(new THREE.BoxGeometry(0.4, 9, 0.4), pole, x, 4.5, z);
+        const board = new THREE.Mesh(new THREE.BoxGeometry(9, 4.5, 0.35), [pole, pole, pole, pole, standard({ map: tex, emissiveMap: tex, emissive: '#ffffff', emissiveIntensity: 0.25 }), pole]);
+        board.position.set(x, 10.5, z); board.rotation.y = side < 0 ? 0 : Math.PI; root.add(board); disposables.push(board.geometry);
+      }
+    }
+    if (lm.has('gardens')) {   // Abuja: flower beds and trimmed hedges beside the boulevard
+      const hedge = standard({ color: '#2f7a3a', roughness: 1 });
+      const flowers = ['#e63946', '#ffd166', '#f78fb3', '#ffffff'];
+      for (const side of [-1, 1]) for (let x = -city.bx + 14; x < city.bx - 10; x += 22) {
+        if (Math.abs(x) < 16) continue;
+        add(new THREE.BoxGeometry(14, 0.9, 1.2), hedge, x, 0.45, side * 8.6);
+        for (let i = 0; i < 5; i++) add(new THREE.SphereGeometry(0.28, 6, 4), standard({ color: flowers[(i + (x | 0)) & 3] }), x - 5 + i * 2.5, 1, side * 8.6);
+      }
+    }
+    if (lm.has('redearth')) {   // Enugu: red-earth verges along the roads and a few boulders
+      const earth = standard({ color: '#a4502f', roughness: 1 });
+      for (const rw of city.roadsEW) for (const side of [-1, 1]) add(new THREE.BoxGeometry(city.bx * 2, 0.06, 1.6), earth, 0, 0.04, rw.z + side * (rw.half + 4.2));
+      const stone = flat('#8b7766');
+      for (let i = 0; i < 26; i++) { const a = rnd(500 + i)(); add(new THREE.IcosahedronGeometry(1, 0), stone, (a - 0.5) * city.bx * 1.9, 0.5, (rnd(900 + i)() > 0.5 ? 1 : -1) * (rnd(300 + i)() * 4 + 8.6), 1.2 + a, 0.9, 1.2); }
     }
     if (lm.has('lagoon')) {   // Lagos: the lagoon with a long bridge across it, south of the city
       const water = new THREE.Mesh(new THREE.PlaneGeometry(city.bx * 2 + 500, 300), standard({ color: '#2d6f8f', roughness: 0.25, metalness: 0.2 }));
@@ -484,6 +513,7 @@ export function createCity(info) {
   });
   trunkI.geometry && disposables.push(trunkI.geometry, crownI.geometry);
   root.add(trunkI, crownI);
+  const standT = trunkI.instanceMatrix.array.slice(), standC = crownI.instanceMatrix.array.slice();
 
   // Real tree models replace the simple stand-ins once they have loaded. Each city plants its own mix.
   const MIX = {
@@ -496,6 +526,27 @@ export function createCity(info) {
   const treeKinds = {};
   trees.forEach((t, i) => { const k = pickKind(i); (treeKinds[k] = treeKinds[k] || []).push([t[0], t[1], (t[2] || 1) / 1.15, i]); });
   let treesGone = false;
+  // The real tree models are detailed (2,000-3,000 triangles each), far too many to draw all at once on a phone.
+  // So only trees close to you use the detailed model; the rest use the light stand-ins.
+  const realTrees = []; let treesReady = false, viewerX = 0, viewerZ = 0, viewerLast = null, cullT = 0;
+  const NEAR2 = 70 * 70, hide4 = new THREE.Matrix4().makeScale(0, 0, 0), tmp4 = new THREE.Matrix4();
+  function cullTrees() {
+    if (!treesReady) return;
+    viewerLast = [viewerX, viewerZ];
+    const nearIdx = new Set();
+    for (const rt2 of realTrees) {
+      let n = 0;
+      rt2.spots.forEach(([x, z, sc, i], k) => {
+        if ((x - viewerX) ** 2 + (z - viewerZ) ** 2 < NEAR2) { rt2.im.setMatrixAt(n++, rt2.mats[k]); nearIdx.add(i); }
+      });
+      rt2.im.count = n; rt2.im.instanceMatrix.needsUpdate = true;
+    }
+    for (let i = 0; i < trees.length; i++) {
+      if (nearIdx.has(i)) { trunkI.setMatrixAt(i, hide4); crownI.setMatrixAt(i, hide4); }
+      else { trunkI.instanceMatrix.array.set(standT.subarray(i * 16, i * 16 + 16), i * 16); crownI.instanceMatrix.array.set(standC.subarray(i * 16, i * 16 + 16), i * 16); }
+    }
+    trunkI.instanceMatrix.needsUpdate = true; crownI.instanceMatrix.needsUpdate = true;
+  }
   Promise.all(Object.keys(treeKinds).map((k) => new GLTFLoader().loadAsync(`/models/trees/${k}.glb`).then((g) => ({ k, g })))).then((loaded) => {
     if (treesGone) return;
     for (const { k, g } of loaded) {
@@ -510,17 +561,19 @@ export function createCity(info) {
         geo.applyMatrix4(o.matrixWorld);
         geo.translate(-c.x, -box.min.y, -c.z);
         const im = new THREE.InstancedMesh(geo, o.material, spots.length);
+        const mats = [];
         spots.forEach(([x, z, sc, i], n) => {
           const sz = base * sc * (0.85 + (i % 5) * 0.06);
           m4.compose(new THREE.Vector3(x, 0, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), (i * 2.399) % 6.28), new THREE.Vector3(sz, sz, sz));
-          im.setMatrixAt(n, m4);
+          im.setMatrixAt(n, m4); mats.push(m4.clone());
         });
         im.frustumCulled = false;
+        realTrees.push({ im, spots, mats });
         root.add(im);
         disposables.push(geo);
       });
     }
-    root.remove(trunkI, crownI);
+    treesReady = true; viewerLast = null; cullTrees();
   }).catch(() => { /* keep the simple trees */ });
 
   // Street lights: a tapering pole on a base, a curved arm reaching over the road, a lamp housing, and a soft pool of light on the ground at night.
@@ -887,8 +940,11 @@ export function createCity(info) {
       for (const d of doorLeaves) best = Math.min(best, Math.hypot(x - d.x, z - d.z - d.sgn * 0.5));
       return best;
     },
+    setViewer(x, z) { viewerX = x; viewerZ = z; },
     update(dt) {
-      if (viaductTrains) viaductTrains.update(Date.now());
+      cullT += dt;
+      if (cullT > 0.4) { cullT = 0; if (!viewerLast || Math.hypot(viewerX - viewerLast[0], viewerZ - viewerLast[1]) > 4) cullTrees(); }
+      if (viaductTrains) viaductTrains.update(Date.now(), viewerX, viewerZ);
       // Doors: swing open (outward, up to ~100 degrees) when anyone is within a few metres, and close again when they leave.
       for (const d of doorLeaves) {
         let near = false;
@@ -896,7 +952,7 @@ export function createCity(info) {
         d.open += ((near ? 1 : 0) - d.open) * (1 - Math.exp(-dt * (near ? 5 : 3)));
         d.hinge.rotation.y = -d.sgn * d.open * 1.75;
       }
-      for (const w of waiters) moveNpc(w.g, dt, 0);
+      for (const w of waiters) { w.g.visible = (w.g.position.x - viewerX) ** 2 + (w.g.position.z - viewerZ) ** 2 < 85 * 85; if (w.g.visible) moveNpc(w.g, dt, 0); }
       const k = 1 - Math.exp(-dt * 14);
       live.forEach((c, i) => {
         c.x += (c.tx - c.x) * k; c.z += (c.tz - c.z) * k;
@@ -910,9 +966,10 @@ export function createCity(info) {
       if (shown < 0) shown = goal;
       shownAcc += dt;
       while (shownAcc > 0.25) { shownAcc -= 0.25; shown += Math.sign(goal - shown); }
-      walkers.forEach((w, i) => { w.g.visible = i < shown; });
+      const FAR2 = 85 * 85;   // people farther than this are too small to see: do not draw them (each one is 5,000-11,000 triangles)
+      walkers.forEach((w, i) => { w.on = i < shown; if (!w.on) w.g.visible = false; });
       for (const w of walkers) {
-        if (!w.g.visible) continue;
+        if (!w.on) continue;
         // Stop for people in the way and step around them instead of walking through.
         const px = w.horizontal ? w.t : w.fixed + (w.off || 0), pz = w.horizontal ? w.fixed + (w.off || 0) : w.t;
         let blocked = false, push = 0;
@@ -931,7 +988,8 @@ export function createCity(info) {
         if (!blocked) w.ph += dt * 6;
         const f = w.fixed + (w.off || 0);
         w.g.position.set(w.horizontal ? w.t : f, w.g.userData.npc ? 0 : Math.abs(Math.sin(w.ph)) * 0.04, w.horizontal ? f : w.t);
-        moveNpc(w.g, dt, blocked ? 0 : w.speed);
+        w.g.visible = (w.g.position.x - viewerX) ** 2 + (w.g.position.z - viewerZ) ** 2 < FAR2;
+        if (w.g.visible) moveNpc(w.g, dt, blocked ? 0 : w.speed);
         w.g.rotation.y = w.horizontal ? (w.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (w.dir > 0 ? 0 : Math.PI);
       }
     },

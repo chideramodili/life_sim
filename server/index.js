@@ -55,7 +55,7 @@ import { homeSolids, parseHome, homeInfo, effectsOf, buyItem, sellItem, placeIte
 // ---------- Settings ----------
 const PORT = process.env.PORT || 8080;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || '*'; // set this to your real site before launch
-const DB_FILE = process.env.DB_FILE || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data', 'game.db');
+let DB_FILE = process.env.DB_FILE || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data', 'game.db');
 const AUTH_LIMIT = Number(process.env.AUTH_LIMIT) || 10;          // wrong passwords or codes per IP per 15 minutes
 const SIGNUP_LIMIT = Number(process.env.SIGNUP_LIMIT) || AUTH_LIMIT * 2; // new accounts per IP per 15 minutes
 const SESSION_DAYS = 30;
@@ -260,7 +260,15 @@ const SHIFT_SCALE = process.env.SHIFT_SCALE !== undefined ? Number(process.env.S
 const SHIFT_LOCKED = new Set(['moveTo', 'act', 'study', 'applyJob', 'quitJob', 'buyMedicine', 'laptopBuy', 'buyVehicle', 'travel', 'enter', 'goOutside', 'drive', 'driveInput', 'visit', 'train', 'steal']);
 
 // ---------- Database ----------
-fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+// Some hosts (serverless-style, e.g. a read-only /var/task) do not let the app write next to its own code.
+// Try the chosen folder, then the system temp folder. Temp is wiped on restart, so set DB_FILE to a persistent disk and use the MongoDB backup.
+try { fs.mkdirSync(path.dirname(DB_FILE), { recursive: true }); fs.accessSync(path.dirname(DB_FILE), fs.constants.W_OK); }
+catch (e) {
+  const alt = path.join((await import('node:os')).tmpdir(), 'adulthood-data', 'game.db');
+  console.warn(`[data] cannot write to ${path.dirname(DB_FILE)} (${e.code}). Using ${alt} instead. It is NOT permanent: set DB_FILE to a persistent disk, or rely on the MongoDB backup.`);
+  DB_FILE = alt;
+  fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+}
 await restoreBackup(DB_FILE);   // on a host that wipes its disk: bring the last copy back from MongoDB first
 const db = new DatabaseSync(DB_FILE);
 db.exec(`
@@ -2158,16 +2166,20 @@ io.on('connection', (socket) => {
     notice(p, 'You lie down to rest. Tap Get up when you feel better.');
   });
   // Sit down where you stand (or stand up again). Walking anywhere stands you up.
-  socket.on('sit', () => {
-    if (p.sit) { p.sit = false; return; }
+  // The browser says which chair it found nearby ({ x, z }); the player walks to it and then sits. Without a chair it just stands up.
+  socket.on('sit', (seat) => {
+    if (p.sit) { p.sit = false; p.sitTo = null; return; }
     if (p.trip || p.drive || p.shift || p.riding || jailLeft(p) || !p.room) return notice(p, 'You cannot sit down right now.');
-    p.sit = true;
-    p.tx = p.x; p.tz = p.z;
+    if (!seat || !Number.isFinite(seat.x) || !Number.isFinite(seat.z) || Math.hypot(seat.x - p.x, seat.z - p.z) > 9) return notice(p, 'There is no chair nearby to sit on.');
+    p.sitTo = { x: seat.x, z: seat.z, until: Date.now() + 7000 };
+    p.tx = seat.x; p.tz = seat.z; p.run = false; p.path = null;
+    const b = boundsOf(p.room); p.tx = clamp(p.tx, -b.bx, b.bx); p.tz = clamp(p.tz, -b.bz, b.bz);
   });
   socket.on('moveTo', (t) => {
     if (p.trip || p.drive) return;
     if (p.frozenUntil && Date.now() < p.frozenUntil) return; // still in the hospital bed
     if (p.lying) getUp(p);
+    p.sitTo = null;
     if (p.sit && t && Number.isFinite(t.x) && Number.isFinite(t.z) && Math.hypot(t.x - p.x, t.z - p.z) > 0.3) p.sit = false;
     const now = Date.now();
     if (now - p.lastMove < 50) return; // ignore floods
@@ -3536,6 +3548,10 @@ setInterval(() => {
       while (p.path.length > 1 && Math.hypot(p.path[0].x - p.x, p.path[0].z - p.z) < 0.35) p.path.shift();
       gx = p.path[0].x; gz = p.path[0].z;
     } else p.path = null;
+    if (p.sitTo) {   // walking to a chair: sit when close (the chair itself is solid), give up if it takes too long
+      if (Math.hypot(p.sitTo.x - p.x, p.sitTo.z - p.z) < 1.25) { p.x = p.tx = p.sitTo.x; p.z = p.tz = p.sitTo.z; p.sit = true; p.sitTo = null; p.path = null; gx = p.x; gz = p.z; }
+      if (now > p.sitTo.until) { p.sitTo = null; p.tx = p.x; p.tz = p.z; notice(p, 'You could not get to that chair.'); }
+    }
     const dx = gx - p.x;
     const dz = gz - p.z;
     const d = Math.hypot(dx, dz);
@@ -3785,5 +3801,9 @@ setInterval(() => {
 }, CLOCK_TICK_MS);
 
 httpServer.listen(PORT, '0.0.0.0', () => {
+<<<<<<< HEAD
   console.log(`Game server running on http://localhost:${PORT}`);
+=======
+  console.log(`Game server running on port ${PORT}`);
+>>>>>>> 1750539 (Build and apply Update 82 client assets)
 });

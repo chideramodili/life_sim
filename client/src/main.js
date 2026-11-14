@@ -75,8 +75,14 @@ const el = (tag, cls, text) => {
 };
 
 // ---------- Scene ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // easier on weak phones
+// Phones have very dense screens: drawing every pixel at full density (plus smoothing) is what makes the game lag.
+// So: smoothing only on normal screens, and the sharpness adjusts itself to keep the game running smoothly (see the frame loop).
+const DPR = window.devicePixelRatio || 1;
+const touchy = matchMedia('(pointer: coarse)').matches;
+const renderer = new THREE.WebGLRenderer({ antialias: DPR < 1.75, powerPreference: 'high-performance' });
+const PR_MAX = Math.min(DPR, touchy ? 1.5 : 2);
+let prNow = PR_MAX;
+renderer.setPixelRatio(prNow);
 renderer.setSize(window.innerWidth, window.innerHeight);
 $('app').appendChild(renderer.domElement);
 
@@ -237,6 +243,7 @@ function buildRoom(info) {
   decor.clear();
   doorAnims.length = 0;
   scene.fog = null;
+  hemi.color.set('#ffffff');
   if (info.city) {
     // The outdoor hub: a long road with a building and a door for every place.
     interior.hide();
@@ -245,6 +252,7 @@ function buildRoom(info) {
     street.setFriendHomes(friendHomes);
     bizUi.setStreet(street, info.cityId || 'lagos');
     scene.fog = new THREE.Fog(scene.background, 150, 380);
+    hemi.color.set((info.theme && info.theme.look && info.theme.look.light) || '#ffffff');   // each city has its own light: warm Lagos, clear Abuja, dusty Enugu
     lastLight = -1;
     return;
   }
@@ -1111,7 +1119,17 @@ function updateSeatView(dt) {
   controls.target.set(p.x + Math.sin(yaw) * 6, eye - 0.1, p.z + Math.cos(yaw) * 6);
   camera.lookAt(controls.target);
 }
-$('sitBtn').addEventListener('click', () => socket.emit('sit'));
+// Sit: stand up if sitting; otherwise find the nearest chair within about 6 metres and walk to it. No chair near: say so.
+$('sitBtn').addEventListener('click', () => {
+  const a = avatars.get(myId);
+  if (!a) return;
+  if (a.sit) { socket.emit('sit'); return; }
+  const spots = currentRoom === 'home' || currentRoom === 'friendhome' ? furniture.seats() : interior.seats();
+  let best = null, bd = 6;
+  for (const s of spots) { const d = Math.hypot(s.x - a.group.position.x, s.z - a.group.position.z); if (d < bd) { bd = d; best = s; } }
+  if (!best) { notice('There is no chair nearby to sit on.'); return; }
+  socket.emit('sit', { x: best.x, z: best.z });
+});
 $('bedBtn').addEventListener('click', () => socket.emit('restBed'));
 let sitTick = 0;
 function updateSitButton(now) {
@@ -1349,8 +1367,22 @@ $('doorBtn').addEventListener('click', () => {
 
 // ---------- Loop ----------
 const clock = new THREE.Clock();
+// Self-adjusting sharpness: if frames take too long, draw fewer pixels; if there is plenty of room, sharpen again.
+let slowAcc = 0, slowN = 0, goodWindows = 0;
+function tuneSharpness(dt) {
+  if (dt > 0.25 || document.hidden) return;   // a pause (tab switch, loading), not real slowness
+  slowAcc += dt; slowN++;
+  if (slowN < 60) return;
+  const avg = slowAcc / slowN; slowAcc = 0; slowN = 0;
+  let next = prNow;
+  if (avg > 0.026) { next = Math.max(0.6, prNow * 0.85); goodWindows = 0; }                 // under ~38 fps: lower it
+  else if (avg < 0.0175) { if (++goodWindows >= 4) { next = Math.min(PR_MAX, prNow * 1.1); goodWindows = 0; } } // comfortably 57+ fps: raise it
+  else goodWindows = 0;
+  if (Math.abs(next - prNow) > 0.01) { prNow = next; renderer.setPixelRatio(prNow); renderer.setSize(window.innerWidth, window.innerHeight); }
+}
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
+  tuneSharpness(dt);
   const k = 1 - Math.exp(-dt * 10); // smooth movement between server updates
   const tnow = performance.now() / 1000;
   for (const a of avatars.values()) {
@@ -1388,7 +1420,7 @@ renderer.setAnimationLoop(() => {
   applyDaylight();
   updateDoors(dt);
   interior.update(dt, world.daylight());
-  if (street) { street.setPeople([...avatars.values()].filter((a) => a.group.visible || a.veh).map((a) => (a.veh ? a.veh.position : a.group.position))); street.update(dt); }
+  if (street) { street.setViewer(camera.position.x, camera.position.z); street.setPeople([...avatars.values()].filter((a) => a.group.visible || a.veh).map((a) => (a.veh ? a.veh.position : a.group.position))); street.update(dt); }
   updateCops(dt, performance.now() / 1000);
   walkInput.update();
   if (cabin.active) {

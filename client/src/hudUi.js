@@ -57,12 +57,24 @@ export function initHud(socket, look) {
   tbClock.id = 'tbClock';
   const tbMood = el('span');
   tbMood.id = 'tbMood';
-  left.append(tbClock, tbMood);
+  left.append(tbMood, tbClock);
+  left.setAttribute('role', 'button'); left.setAttribute('aria-expanded', 'false');
   const tbCash = el('div', 'tbPill');
   tbCash.id = 'tbCash';
   bar.append(left, tbCash);
   document.body.append(bar);
-  left.addEventListener('click', () => $('needsStrip').click());
+  // A small circle with your mood face. Tap it to open the day, date and time; it closes again by itself after a few seconds.
+  let closeT = 0;
+  const setOpen = (open) => {
+    left.classList.toggle('open', open);
+    left.setAttribute('aria-expanded', String(open));
+    document.body.classList.toggle('dateOpen', open); // lets the music island slide down out of the way
+    clearTimeout(closeT);
+    if (open) closeT = setTimeout(() => setOpen(false), 3000);
+  };
+  // The pill is always open while no music plays; with music it is a circle that opens for 3 seconds.
+  left.addEventListener('click', () => { if (!document.body.classList.contains('musicOn')) return; setOpen(!left.classList.contains('open')); });
+  new MutationObserver(() => { if (!document.body.classList.contains('musicOn') && left.classList.contains('open')) setOpen(false); }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
   const mirror = () => {
     tbClock.textContent = $('clock').textContent.replace(/^Mon|^Tue|^Wed|^Thu|^Fri|^Sat|^Sun/, (d) => d).trim();
@@ -107,8 +119,27 @@ export function initHud(socket, look) {
     lightDock.classList.toggle('off', !lightsOn);
     lightDock.title = lightsOn ? 'Lights: on (tap to switch off)' : 'Lights: off (tap to switch on)';
   });
-  dock.append(menuBtn, chatBtn, phoneBtnDock, mapDock, lightDock, rotateDock);
+  const dockToggle = mkDock('dockToggle', '⊞', 'Buttons', () => dock.classList.toggle('open'));
+  dock.append(dockToggle, menuBtn, chatBtn, phoneBtnDock, mapDock, lightDock, rotateDock);
   document.body.append(dock);
+  dock.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && b !== dockToggle && b.id !== 'chatBtn') setTimeout(() => dock.classList.remove('open'), 120); else if (b && b.id === 'chatBtn') setTimeout(() => dock.classList.remove('open'), 120); });
+  document.addEventListener('pointerdown', (e) => { if (dock.classList.contains('open') && !dock.contains(e.target)) dock.classList.remove('open'); });
+  // ----- right side: one small button for First person, Sit, Back to game, Rest, Driver view and the camera buttons -----
+  const sideToggle = el('button');
+  sideToggle.id = 'sideToggle'; sideToggle.textContent = '⋯'; sideToggle.setAttribute('aria-label', 'More buttons'); sideToggle.hidden = true;
+  sideToggle.addEventListener('click', () => document.body.classList.toggle('sideOpen'));
+  document.body.append(sideToggle);
+  const sideIds = ['fpvBtn', 'seatBtn', 'sitBtn', 'bedBtn', 'gameBtn', 'camBar'];
+  document.addEventListener('pointerdown', (e) => { if (document.body.classList.contains('sideOpen') && e.target !== sideToggle && !sideIds.some((id) => { const n = document.getElementById(id); return n && n.contains(e.target); })) document.body.classList.remove('sideOpen'); });
+  for (const id of sideIds) { const n = document.getElementById(id); if (n) n.addEventListener('click', () => setTimeout(() => document.body.classList.remove('sideOpen'), 150)); }
+  // The toggle (and the dot on the dock button) follow what is on screen.
+  setInterval(() => {
+    const any = sideIds.some((id) => { const n = document.getElementById(id); return n && !n.hidden && id !== 'camBar'; }) || !!document.querySelector('#camBar');
+    sideToggle.hidden = !any;
+    if (!any) document.body.classList.remove('sideOpen');
+    const cb = document.getElementById('chatBadge');
+    dockToggle.classList.toggle('hasDot', (cb && !cb.hidden) || !menuDot.hidden);
+  }, 400);
 
   // ----- menu (the old info panel) -----
   const head = el('div', 'menuHead');

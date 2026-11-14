@@ -45,7 +45,7 @@ export function createViaductTrains(root, segs, deckY) {
 
   // Time comes from the clock, so every browser agrees: a triangle wave with a wait at each end.
   return {
-    update(nowMs) {
+    update(nowMs, vx = 0, vz = 0) {
       if (!ready) return;
       const t = nowMs / 1000;
       for (const r of runners) {
@@ -61,7 +61,7 @@ export function createViaductTrains(root, segs, deckY) {
         const [x0, z0, x1, z1] = r.seg;
         const ux = (x1 - x0) / r.len, uz = (z1 - z0) / r.len;
         const mid = N / 2 + c;                        // metres from the start of the line
-        r.consist.visible = true;
+        r.consist.visible = Math.hypot(x0 + ux * mid - vx, z0 + uz * mid - vz) < 120;   // far trains are not drawn (each car is 25,000 triangles)
         r.consist.rotation.y = Math.atan2(ux * dir, uz * dir);   // the model's front is +z
         r.consist.position.set(x0 + ux * mid, deckY + 0.5, z0 + uz * mid);
       }

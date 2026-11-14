@@ -1,8 +1,9 @@
 // Adulthood: draws the furniture, paint, and walls in your Home. The server decides what you own and where it is.
 // This file only turns that into simple 3D shapes. Only your own Home shows any of this.
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-const wood = '#1ea5bd';
+const wood = '#8a5a35';
 const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.8, ...extra });
 const box = (w, h, d, color, x = 0, y = 0, z = 0, extra) => {
   const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat(color, extra));
@@ -81,18 +82,6 @@ const BUILD = {
     g.add(box(w - 0.1, 0.45, d - 0.1, col, 0, 0, 0), box(w - 0.1, 0.55, 0.25, shade(col, 0.85), 0, 0.45, -d / 2 + 0.2), box(0.2, 0.3, d - 0.1, shade(col, 0.85), -w / 2 + 0.15, 0.45, 0), box(0.2, 0.3, d - 0.1, shade(col, 0.85), w / 2 - 0.15, 0.45, 0));
     if (c.id === 'sofa_sect') g.add(box(0.9, 0.45, 0.9, col, w / 2 - 0.5, 0, 0.9), box(0.2, 0.3, 0.9, shade(col, 0.85), w / 2 - 0.1, 0.45, 0.9));
     if (c.tier >= 2) for (let i = 0; i < 3; i++) g.add(box(0.12, 0.3, 0.6, '#f2e6c9', -w / 2 + 0.5 + i * 0.5, 0.45, -0.1));
-    return g;
-  },
-  chair: (w, d, c) => {
-    const g = new THREE.Group();
-    const col = c.color || '#e8e0d0';
-    if (c.id === 'chair') {
-      const high = 0.8 + c.tier * 0.08;
-      g.add(box(w - 0.05, 0.4, d - 0.05, c.frame), box(w - 0.2, 0.3, d - 0.2, col, 0.05, 0.4, 0), box(0.5, 0.15, Math.min(d - 0.5, 1.2), '#ffffff', -w / 2 + 0.45, 0.7, 0), box(0.14, high, d - 0.05, shade(c.frame, 1.15), -w / 2 + 0.07, 0, 0));
-      if (d > 1.5) g.add(box(0.5, 0.15, 0.7, '#ffffff', -w / 2 + 0.45, 0.7, 0.6), box(w - 0.3, 0.06, d - 0.3, shade(col, 1.25), 0.1, 0.7, 0));
-    } else {
-      g.add(box(w - 0.1, c.tier === 0 ? 0.12 : 0.3 + c.tier * 0.03, d - 0.1, col, 0, 0.02, 0), box(0.5, 0.12, d - 0.4, '#ffffff', -w / 2 + 0.45, 0.35, 0));
-    }
     return g;
   },
   rug: (w, d, c) => {
@@ -187,8 +176,64 @@ const BUILD = {
   },
 };
 
+// ---- Real models (.glb) for the pieces that have one. Each model loads once and is copied for every piece you place. ----
+const modelCache = new Map(); // name -> { scene, size } once loaded, or 'loading' / 'failed'
+const modelWaiters = new Set();
+const modelTries = new Map();
+function loadModel(name) {
+  const hit = modelCache.get(name);
+  if (hit) return hit === 'loading' || hit === 'failed' ? null : hit;
+  modelCache.set(name, 'loading');
+  const tryLoad = new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timeout')), 20000);   // a model that hangs counts as failed, then we try again
+    new GLTFLoader().loadAsync(`/models/furniture/${name}.glb`).then((g) => { clearTimeout(t); resolve(g); }, (e) => { clearTimeout(t); reject(e); });
+  });
+  tryLoad.then((gltf) => {
+    const scene = gltf.scene;
+    // Stand it on the floor with its middle on the origin, and remember how big it really is.
+    const box = new THREE.Box3().setFromObject(scene);
+    const c = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const holder = new THREE.Group();
+    scene.position.set(-c.x, -box.min.y, -c.z);
+    holder.add(scene);
+    modelCache.set(name, { scene: holder, size });
+    for (const f of modelWaiters) f();
+  }).catch(() => {
+    // One slow or dropped download must not make a piece disappear for the whole visit: ask again a few times.
+    const n = (modelTries.get(name) || 0) + 1;
+    modelTries.set(name, n);
+    if (n < 5) { modelCache.delete(name); setTimeout(() => { for (const f of modelWaiters) f(); }, 1500 * n); } else modelCache.set(name, 'failed');
+  });
+  return null;
+}
+// A copy of the model shrunk (never grown) to fit the footprint. Null until it has loaded.
+function glbPiece(def) {
+  const m = loadModel(def.glb);
+  if (!m) return null;
+  const g = new THREE.Group();
+  const copy = m.scene.clone(true);
+  const k = Math.min(1, (def.size[0] * 0.98) / m.size.x, (def.size[1] * 0.98) / m.size.z);
+  copy.scale.setScalar(k);
+  copy.position.y = def.lift || 0;
+  g.add(copy);
+  return g;
+}
+
+// What stands in while a model is still loading (or never loads), so a piece you bought is never invisible.
+function standIn(w, d, c) {
+  const g = new THREE.Group();
+  const col = c.color || '#8d8478';
+  if (c.group === 'seat') {
+    g.add(box(Math.min(w, 0.7), 0.08, Math.min(d, 0.7), col, 0, 0.42, 0), box(Math.min(w, 0.7), 0.5, 0.08, shade(col, 0.85), 0, 0.5, -Math.min(d, 0.7) / 2 + 0.04));
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) g.add(box(0.06, 0.42, 0.06, shade(col, 0.6), x * Math.min(w, 0.7) * 0.42, 0, z * Math.min(d, 0.7) * 0.42));
+  } else g.add(box(w * 0.7, 0.6, d * 0.7, col, 0, 0, 0));
+  return g;
+}
+
 // One piece on its own, for the shop thumbnails. Returns null for a kind that has no model.
 export function buildPiece(def) {
+  if (def.glb) return glbPiece(def);
   const build = BUILD[def.group];
   if (!build) return null;
   const g = new THREE.Group();
@@ -232,24 +277,32 @@ export function createFurniture(scene) {
   const meshes = new Map(); // uid -> group
   let lampOn = false;
   let lightsOn = true;
+  modelWaiters.add(() => rebuild());
 
+  let seatSpots = [];
   function rebuild() {
     for (const g of meshes.values()) items.remove(g);
     meshes.clear();
+    seatSpots = [];
     if (!data) return;
     for (const it of data.items) {
       if (!it.placed) continue;
       const def = data.catalog.find((c) => c.id === it.id);
       const build = def ? BUILD[def.group] : null;
-      if (!def || !build) continue;
+      if (!def || (!build && !def.glb)) continue;
       const [w, d] = def.size;
       const g = new THREE.Group();
-      g.add(build(w, d, def));
+      // A piece with a real model uses it; until it has loaded (or if it cannot load) the simple box version stands in.
+      const real = def.glb ? glbPiece(def) : null;
+      if (real) g.add(real);
+      else if (build) g.add(build(w, d, def));
+      else g.add(standIn(w, d, def));
       const fw = it.rot ? d : w;
       const fd = it.rot ? w : d;
       g.position.set(it.x + fw / 2, 0, it.z + fd / 2);
       if (it.rot) g.rotation.y = Math.PI / 2;
       g.userData = { fw, fd };
+      if (def.group === 'seat' || def.group === 'sofa') { const n = Math.max(1, Math.round(Math.max(fw, fd) / (def.group === 'sofa' ? 0.9 : 1.6))); for (let k = 0; k < n; k++) { const o = (k - (n - 1) / 2) * 0.9; seatSpots.push(fw >= fd ? { x: g.position.x + o, z: g.position.z } : { x: g.position.x, z: g.position.z + o }); } }
       items.add(g);
       meshes.set(it.uid, g);
     }
@@ -265,6 +318,7 @@ export function createFurniture(scene) {
   }
 
   return {
+    seats() { return seatSpots; },
     // New furniture data from the server (or null on log out).
     set(info) {
       data = info;

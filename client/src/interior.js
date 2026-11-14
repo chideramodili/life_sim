@@ -106,6 +106,7 @@ const HAIR = ['#111111', '#1c1410', '#2a1a10', '#3a2a1a', '#111111'];
 const CLOTH = ['#c0392b', '#2980b9', '#27ae60', '#f39c12', '#8e44ad', '#16a085', '#d35400', '#7f8c8d', '#e8e8e8', '#2c3e50'];
 
 export function createInterior(scene) {
+  let seatSpots = [];   // where a person can sit in the current room (chairs, sofa seats)
   const root = new THREE.Group();
   root.visible = false;
   scene.add(root);
@@ -179,6 +180,7 @@ export function createInterior(scene) {
     for (const dx of [-1, 1]) for (const dz of [-1, 1]) put(g, 0.1, 0.8, 0.1, shade(color, 0.7), x + dx * (w / 2 - 0.1), 0.4, z + dz * (d / 2 - 0.1));
   };
   const chair = (g, x, z, color = '#4a3b2a') => {
+    seatSpots.push({ x, z });
     put(g, 0.5, 0.08, 0.5, color, x, 0.5, z);
     put(g, 0.5, 0.6, 0.08, color, x, 0.8, z - 0.25);
     for (const dx of [-1, 1]) for (const dz of [-1, 1]) put(g, 0.06, 0.5, 0.06, '#222', x + dx * 0.2, 0.25, z + dz * 0.2);
@@ -191,6 +193,7 @@ export function createInterior(scene) {
     owned.push(l.geometry);
   };
   const sofa = (g, x, z, color = '#5b4a8a', rot = 0) => {
+    for (const dx of [-0.5, 0.5]) seatSpots.push({ x: x + dx * Math.cos(rot), z: z - dx * Math.sin(rot) });
     const s = new THREE.Group();
     put(s, 2.2, 0.5, 0.9, color, 0, 0.3, 0);
     put(s, 2.2, 0.7, 0.25, color, 0, 0.75, -0.35);
@@ -640,6 +643,7 @@ export function createInterior(scene) {
   function clear() {
     for (const c of [...root.children]) root.remove(c);
     figures = [];
+    seatSpots = [];
     windows = [];
     lamps = [];
     for (const o of owned) o.dispose && o.dispose();
@@ -682,6 +686,7 @@ export function createInterior(scene) {
       }
       return out;
     },
+    seats() { return seatSpots; },
     hide() {
       clear();
       current = null;

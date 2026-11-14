@@ -92,7 +92,7 @@ export function initFriends(socket) {
   }
 
   function openChat(name) {
-    chatWith = name;
+    chatWith = name; $('moneySec').hidden = true;
     messages = [];
     paintChat();
     socket.emit('dmOpen', { with: name });
@@ -138,12 +138,13 @@ export function initFriends(socket) {
   });
   $('dmInput').addEventListener('keydown', (e) => e.key === 'Enter' && $('dmSendBtn').click());
   $('dmPhoneBtn').addEventListener('click', () => chatWith && socket.emit('sharePhone', { to: chatWith }));
+  $('dmMoneyTog').addEventListener('click', () => { const sec = $('moneySec'); sec.hidden = !sec.hidden; if (!sec.hidden) { $('moneyInput').focus(); sec.scrollIntoView({ block: 'nearest' }); } });
   $('moneyBtn').addEventListener('click', () => {
     const amount = Math.floor(Number($('moneyInput').value));
     if (!chatWith || !Number.isFinite(amount) || amount <= 0) return;
     if (!confirm(`Send ₦${fmt(amount)} to ${chatWith}? You cannot take it back.`)) return;
     socket.emit('sendMoney', { to: chatWith, amount });
-    $('moneyInput').value = '';
+    $('moneyInput').value = ''; $('moneySec').hidden = true;
   });
   $('dmRemoveBtn').addEventListener('click', () => {
     if (chatWith && confirm(`Remove ${chatWith} from your friends?`)) socket.emit('friendRemove', { name: chatWith });

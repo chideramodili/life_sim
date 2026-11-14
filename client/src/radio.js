@@ -168,6 +168,7 @@ export const SYNTH = [
 export function initRadio() {
   let ctx = null, master = null, comp = null;
   let current = null;          // { id, name, stop() }
+  let startAt = 0;             // when the current station began (for the timer)
   let files = [];
   let volume = Math.min(1, Math.max(0, Number(store.get('vol', 0.6))));
   let chip = store.get('chip', 'all');
@@ -244,16 +245,20 @@ export function initRadio() {
         step++; next += stepLen;
       }
     }, 80);
+    startAt = performance.now();
     current = { id: st.id, name: st.name, stop() { clearInterval(timer); bus.gain.setTargetAtTime(0, ctx.currentTime, 0.05); setTimeout(() => bus.disconnect(), 400); } };
   }
 
   function playFile(f) {
     audio.loop = !f.live; audio.src = f.url; audio.volume = volume;
     audio.play().catch(() => { if (current && current.id === f.id && f.live) { note = 'That station would not play. Try another one.'; stop(); } });
+    startAt = performance.now();
     current = { id: f.id, name: f.name, live: !!f.live, stop() { audio.pause(); } };
   }
 
-  function play(st) {
+  let curList = null;
+  function play(st, list) {
+    if (list) curList = list;
     if (current) { try { current.stop(); } catch { /* ignore */ } current = null; }
     note = '';
     if (st.file || st.live) playFile(st); else playSynth(st);
@@ -261,14 +266,14 @@ export function initRadio() {
     paint();
   }
 
-  function row(st) {
+  function row(st, list) {
     const on = current && current.id === st.id;
     const r = el('div', 'job radioRow');
     const head = el('div', 'skillHead');
     head.append(el('span', 'skillName', `${on ? '▶ ' : ''}${st.name}`));
     r.append(head, el('div', 'fine', st.credit ? `${st.blurb || ''} ${st.credit}`.trim() : st.blurb || ''));
     const b = el('button', 'mini', on ? 'Stop' : 'Play');
-    b.addEventListener('click', () => (on ? stop() : play(st)));
+    b.addEventListener('click', () => (on ? stop() : play(st, list)));
     r.append(b);
     return r;
   }
@@ -285,14 +290,15 @@ export function initRadio() {
     body.append(chips);
     const gen = SYNTH.filter((s) => chip === 'all' || s.genre === chip);
     const lv = chip === 'all' ? null : live[chip];
-    if (gen.length) { body.append(el('div', 'fine', 'Generated stations (instrumental, made live in your browser)')); for (const st of gen) body.append(row(st)); }
-    if (chip === 'all') for (const f of files) body.append(row(f));
+    const list = chip === 'all' ? [...gen, ...files] : [...gen, ...((lv && lv.list) || [])];
+    if (gen.length) { body.append(el('div', 'fine', 'Generated stations (instrumental, made live in your browser)')); for (const st of gen) body.append(row(st, list)); }
+    if (chip === 'all') for (const f of files) body.append(row(f, list));
     if (chip !== 'all') {
       body.append(el('div', 'fine', 'Live stations'));
       if (!lv || lv.state === 'loading') body.append(el('div', 'fine', 'Finding stations…'));
       else if (lv.state === 'err') { const m = el('div', 'fine', 'Could not load live stations. Check your internet and try again.'); const rb = el('button', 'mini', 'Try again'); rb.addEventListener('click', () => { delete live[chip]; loadLive(chip); }); body.append(m, rb); }
       else if (!lv.list.length) body.append(el('div', 'fine', 'No live stations found for this one right now.'));
-      else for (const st of lv.list) body.append(row(st));
+      else for (const st of lv.list) body.append(row(st, list));
     }
     if (chip === 'all') {
       const soon = el('div', 'radioSoon');
@@ -360,20 +366,60 @@ export function initRadio() {
     audio.volume = volume;
   });
   paint();
-  // The dynamic island: shows the name of what is playing, with a spinning disc. Tap it to open the Radio app, ■ to stop.
+  // Next / previous: moves through the list the current station came from (or all generated + your own stations).
+  function step(dir) {
+    if (!current) return;
+    const all = curList && curList.length ? curList : [...SYNTH, ...files];
+    if (!all.length) return;
+    const k = all.findIndex((x) => x.id === current.id);
+    play(all[((k < 0 ? 0 : k) + dir + all.length) % all.length], all);
+  }
+  const fmt = (t) => { t = Math.max(0, Math.floor(t || 0)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+  const timing = () => {
+    if (!current) return { a: '0:00', b: '', pct: 0 };
+    const real = current.live === undefined && !current.id.startsWith('file-') ? false : !current.live;
+    const isFile = current.id.startsWith('file-');
+    if (isFile && isFinite(audio.duration) && audio.duration > 0) return { a: fmt(audio.currentTime), b: fmt(audio.duration), pct: (audio.currentTime / audio.duration) * 100 };
+    return { a: fmt((performance.now() - startAt) / 1000), b: real && isFile ? '' : 'LIVE', pct: 0 };
+  };
+  const npNext = $('npNext'), npPrev = $('npPrev'), npStop = $('npStop');
+  if (npNext) { npNext.addEventListener('click', () => step(1)); npPrev.addEventListener('click', () => step(-1)); npStop.addEventListener('click', () => stop()); }
+  // Radio / Audiomack are full-screen: hide the joystick and island while they are open.
+  const musicState = () => document.body.classList.toggle('musicOpen', !$('radioPanel').hidden || !$('amPanel').hidden);
+  const mo = new MutationObserver(musicState);
+  mo.observe($('radioPanel'), { attributes: true, attributeFilter: ['hidden'] });
+  mo.observe($('amPanel'), { attributes: true, attributeFilter: ['hidden'] });
+
+  // The dynamic island: name of what is playing with a spinning disc. Tap it to grow it (previous / next / time); tap again to shrink.
   const isl = document.getElementById('island');
   if (isl) {
     const nm = isl.querySelector('.nm span');
-    let shown = '';
+    let shown = '', bigT = 0;
+    const setBig = (on) => { isl.classList.toggle('grown', on); clearTimeout(bigT); if (on) bigT = setTimeout(() => isl.classList.remove('grown'), 12000); };
     const sync = () => {
       const name = current ? current.name : '';
+      const t = timing();
+      for (const [a, b, f] of [['islT0', 'islT1', 'islFill'], ['npT0', 'npT1', 'npFill']]) {
+        const A = $(a), B = $(b), F = $(f);
+        if (A) { A.textContent = t.a; B.textContent = t.b; F.style.width = t.pct + '%'; }
+      }
+      document.body.classList.toggle('musicOn', !!name);
       if (name === shown) return;
       shown = name;
       isl.classList.toggle('on', !!name);
+      if (!name) isl.classList.remove('grown');
       if (name) { nm.textContent = name; nm.classList.remove('run'); requestAnimationFrame(() => nm.classList.toggle('run', nm.scrollWidth > nm.parentElement.clientWidth)); }
+      const rn = $('radioNow'); if (rn && !$('radioPanel').hidden) paint();
     };
     setInterval(sync, 400);
-    isl.addEventListener('click', (e) => { if (e.target.id === 'islandStop') { stop(); sync(); return; } const b = document.getElementById('radioBtn'); if (b) b.click(); });
+    isl.addEventListener('click', (e) => {
+      const id = e.target.id;
+      if (id === 'islandStop') { stop(); sync(); return; }
+      if (id === 'islPrev') { step(-1); setBig(true); return; }
+      if (id === 'islNext') { step(1); setBig(true); return; }
+      if (id === 'islOpen') { setBig(false); const b = $('radioBtn'); if (b) b.click(); return; }
+      setBig(!isl.classList.contains('grown'));
+    });
   }
   return { stop, nowPlaying: () => (current ? current.name : '') };
 }

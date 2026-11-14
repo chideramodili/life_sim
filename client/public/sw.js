@@ -1,6 +1,6 @@
 // Adulthood service worker. It keeps the game's own files (page, scripts, models, icons) so the app opens fast,
 // and always asks the network first for the page so updates arrive. It never touches /api or the live game connection.
-const CACHE = 'adulthood-v1';
+const CACHE = 'adulthood-v2';
 self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/manifest.webmanifest', '/icon-192.png']).catch(() => {}))); });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
@@ -17,5 +17,5 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   // files with a hash in the name never change, models and icons rarely: cache first
-  e.respondWith(caches.match(r).then((hit) => hit || fetch(r).then((res) => { if (res.ok) { const c = res.clone(); caches.open(CACHE).then((x) => x.put(r, c)); } return res; })));
+  e.respondWith(caches.match(r).then((hit) => hit || fetch(r).then((res) => { if (res.ok && !/text\/html/.test(res.headers.get('content-type') || '')) { const c = res.clone(); caches.open(CACHE).then((x) => x.put(r, c)); } return res; })));
 });

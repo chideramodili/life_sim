@@ -47,10 +47,6 @@ body.clean #chip > div:first-child { white-space: nowrap; overflow: hidden; text
 body.clean #chip.open > div:first-child { white-space: normal; }
 
 /* ---------- other right-side buttons slide down to clear the cash pill ---------- */
-body.clean #camBar { top: 56px; }
-body.clean #fpvBtn, body.clean #seatBtn { top: 108px; }
-body.clean #sitBtn { top: 148px; }
-body.clean #gameBtn { top: 192px; }
 body.clean #needsStrip { opacity: 1; }
 
 /* ---------- phone home screen ---------- */
@@ -243,3 +239,32 @@ body.clean:not(.noglass) #phoneFrame { background: linear-gradient(145deg, #3b41
 #phoneBody { max-height: 55vh; overflow-y: auto; }
 
 #laptopBody { max-height: 55vh; overflow-y: auto; }
+
+/* The date pill is a small round mood face; it opens to show the day, date and time when tapped. */
+/* Date pill: a normal long pill (mood, day, time). While music plays it folds into a small circle with just the mood face; tap it to open for 3 seconds. */
+body.clean #tbLeft { width: auto; min-width: 36px; max-width: 300px; padding: 0 14px 0 8px; gap: 8px; justify-content: flex-start; overflow: hidden; cursor: pointer; transition: max-width .4s cubic-bezier(.22,.8,.3,1), padding .3s ease, gap .3s ease; }
+body.clean #tbLeft #tbClock { display: inline; white-space: nowrap; max-width: 220px; opacity: 1; transition: max-width .4s cubic-bezier(.22,.8,.3,1), opacity .25s ease; }
+body.clean #tbLeft #tbMood { font-size: 20px; line-height: 1; }
+body.clean.musicOn #tbLeft:not(.open) { max-width: 36px; padding: 0; gap: 0; justify-content: center; }
+body.clean.musicOn #tbLeft:not(.open) #tbClock { max-width: 0; opacity: 0; }
+
+/* Left dock: one small button that drops the others down */
+body.clean #dock > button:not(#dockToggle) { display: none !important; }
+body.clean #dock.open > button:not(#dockToggle):not([hidden]) { display: block !important; animation: dockIn .26s cubic-bezier(.22,.8,.3,1) both; }
+body.clean #dock.open > button:nth-child(3) { animation-delay: .03s; } body.clean #dock.open > button:nth-child(4) { animation-delay: .06s; } body.clean #dock.open > button:nth-child(5) { animation-delay: .09s; } body.clean #dock.open > button:nth-child(6) { animation-delay: .12s; } body.clean #dock.open > button:nth-child(7) { animation-delay: .15s; }
+@keyframes dockIn { from { opacity: 0; transform: translateY(-10px) scale(0.85); } to { opacity: 1; transform: none; } }
+body.clean #dockToggle { transition: transform .25s ease; }
+body.clean #dock.open #dockToggle { transform: rotate(90deg); }
+body.clean #dockToggle.hasDot::after { content: ''; position: absolute; top: 1px; right: 1px; width: 11px; height: 11px; border-radius: 50%; background: #ff5a4a; border: 2px solid #20152f; }
+
+/* Right side: First person, Sit, Back to game, Rest, Driver view and the camera buttons live behind one small button */
+body.clean #sideToggle { position: fixed; right: 12px; top: 56px; z-index: 7; width: 44px; height: 44px; padding: 0; border-radius: 50%; border: 0.5px solid rgba(255, 255, 255, 0.14); background: var(--pill-bg); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); color: var(--text); font-size: 22px; line-height: 1; transition: transform .25s ease; }
+body.clean #sideToggle[hidden] { display: none; }
+body.clean.sideOpen #sideToggle { transform: rotate(90deg); }
+body.clean:not(.sideOpen) #fpvBtn, body.clean:not(.sideOpen) #seatBtn, body.clean:not(.sideOpen) #sitBtn, body.clean:not(.sideOpen) #bedBtn, body.clean:not(.sideOpen) #gameBtn, body.clean:not(.sideOpen) #camBar { display: none !important; }
+body.clean.sideOpen #fpvBtn, body.clean.sideOpen #seatBtn, body.clean.sideOpen #sitBtn, body.clean.sideOpen #bedBtn, body.clean.sideOpen #gameBtn, body.clean.sideOpen #camBar { animation: sideIn .26s cubic-bezier(.22,.8,.3,1) both; }
+@keyframes sideIn { from { opacity: 0; transform: translateY(-10px) scale(0.9); } to { opacity: 1; transform: none; } }
+body.clean #fpvBtn, body.clean #seatBtn { top: 108px; }
+body.clean #sitBtn, body.clean #bedBtn { top: 152px; }
+body.clean #gameBtn { top: 196px; }
+body.clean #camBar { top: 240px; }
