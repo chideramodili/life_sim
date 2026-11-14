@@ -3784,6 +3784,6 @@ setInterval(() => {
   io.emit('clock', clockInfo());
 }, CLOCK_TICK_MS);
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`Game server running on http://localhost:${PORT}`);
 });
