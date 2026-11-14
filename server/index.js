@@ -53,7 +53,7 @@ import {
 import { homeSolids, parseHome, homeInfo, effectsOf, buyItem, sellItem, placeItem, putAway, paint, setLights } from './home.js';
 
 // ---------- Settings ----------
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 8080;
 const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || '*'; // set this to your real site before launch
 const DB_FILE = process.env.DB_FILE || path.join(path.dirname(fileURLToPath(import.meta.url)), 'data', 'game.db');
 const AUTH_LIMIT = Number(process.env.AUTH_LIMIT) || 10;          // wrong passwords or codes per IP per 15 minutes
