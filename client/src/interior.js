@@ -86,6 +86,7 @@ const THEMES = {
   club:      { floor: ['carpet', '#2a1a40'], wall: '#241040', props: 'club', crowd: 9, staff: ['#c77dff'] },
   hotel:     { floor: ['wood', '#8a6a4a'], wall: '#5a3b2e', props: 'hotel', crowd: 4, staff: ['#ffb347', '#ffb347'] },
   eventcenter: { floor: ['carpet', '#2a3050'], wall: '#2b3a67', props: 'eventcenter', crowd: 9, staff: ['#7ae0ff'] },
+  depot:     { floor: ['concrete', '#7a7a80'], wall: '#4a5a3a', props: 'depot', crowd: 3, staff: ['#ffb02e', '#ffb02e'] },
   bank:      { floor: ['tile', '#cfc8b4'], wall: '#27493f', props: 'bank', crowd: 3, staff: ['#f4d35e', '#f4d35e'] },
   boutique:  { floor: ['wood', '#b79a82'], wall: '#6b4a78', props: 'boutique', crowd: 4, staff: ['#ff7eb6'] },
   homestore: { floor: ['wood', '#9a7a52'], wall: '#7a6540', props: 'homestore', crowd: 3, staff: ['#ff9f1c'] },
@@ -430,6 +431,18 @@ export function createInterior(scene) {
       poster(g, -9.8, 2.6, 0, 5, 1.4, '#c8a050', Math.PI / 2);
       for (const x of [-4, 4]) lamps.push(put(g, 0.5, 0.5, 0.5, '#ffd9a0', x, 3.6, 0, { emissive: '#ffd9a0', emissiveIntensity: 0.9 }));
     },
+    depot(g) {
+      // a dispatch counter, shelves of parcels, a conveyor belt and a van on the wall poster
+      counter(g, 0, -6.4, 6, '#3a4a2a', '#d8d0c4');
+      computer(g, -1.3, 1.1, -6.4); computer(g, 1.3, 1.1, -6.4);
+      for (const x of [-8, -5.2, 5.2, 8]) { put(g, 2.2, 0.12, 1, '#6a6a72', x, 0.9, -9.3); put(g, 2.2, 0.12, 1, '#6a6a72', x, 1.8, -9.3); put(g, 2.2, 0.12, 1, '#6a6a72', x, 2.7, -9.3); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) put(g, 0.55, 0.45, 0.6, j === 1 ? '#c9a063' : '#a07a4a', x - 0.7 + i * 0.7, 1.15 + j * 0.9, -9.3); }
+      put(g, 8, 0.3, 1.1, '#2a2a30', 0, 0.4, 5.5); put(g, 7.6, 0.05, 0.9, '#111', 0, 0.58, 5.5);
+      for (const x of [-2.5, 0.5, 2.8]) put(g, 0.6, 0.45, 0.6, '#c9a063', x, 0.83, 5.5);
+      crateStack(g, -8.5, 3, 3); crateStack(g, 8.5, 3, 4); crateStack(g, 8.5, 5.2, 2);
+      put(g, 3.4, 1.4, 0.06, '#ffb02e', 0, 3.6, -9.85); put(g, 2.2, 0.6, 0.08, '#2a2a30', 0, 3.6, -9.8);
+      for (const x of [-3.5, 3.5]) lamps.push(put(g, 0.5, 0.2, 0.5, '#fff1c9', x, 3.9, 0, { emissive: '#fff1c9', emissiveIntensity: 0.8 }));
+      plant(g, -9, 7, 1.3);
+    },
     eventcenter(g) {
       // a stage with curtains and speakers, rows of chairs, a bar and spotlights
       put(g, 11, 0.7, 4.2, '#2a2230', 0, 0.35, -8);
@@ -518,7 +531,7 @@ export function createInterior(scene) {
       // staff stand behind counters / at their post; customers wander the floor in front
       staff: {
         plaza: [[0, -4.5]], gym: [[6.5, 6.4]], market: [[-6.5, 6.4], [-7, -4.3], [1, -4.3]], jobs: [[-7, -7.3], [3.5, -7.3]], shop: [[6, 6.4]],
-        library: [[7, 7.4]], pharmacy: [[4, -7.7]], hospital: [[4, -7.8], [-3, -4.5]], police: [[4, -7.8], [0, -5]], terminal: [[-5, -7.8], [5, -7.8]], airport: [[-5, -7.8], [5, -7.8]], garage: [[7.5, 6.4]], club: [[-9.6, 2], [0, -9.9]], hotel: [[-1.5, -7.6], [1.5, -7.6]], eventcenter: [[0, -6.2]], bank: [[-4, -7.8], [4, -7.8]], boutique: [[6.5, 6.4]], homestore: [[-6.5, 7.4]],
+        library: [[7, 7.4]], pharmacy: [[4, -7.7]], hospital: [[4, -7.8], [-3, -4.5]], police: [[4, -7.8], [0, -5]], terminal: [[-5, -7.8], [5, -7.8]], airport: [[-5, -7.8], [5, -7.8]], garage: [[7.5, 6.4]], club: [[-9.6, 2], [0, -9.9]], hotel: [[-1.5, -7.6], [1.5, -7.6]], eventcenter: [[0, -6.2]], depot: [[-1.5, -7.6], [1.5, -7.6]], bank: [[-4, -7.8], [4, -7.8]], boutique: [[6.5, 6.4]], homestore: [[-6.5, 7.4]],
         biz_cafe: [[6, 6.4], [3, 6.4], [-6, 6.4], [-3, 6.4]], biz_minimart: [[6, 6.4], [3, 6.4], [-6, 6.4], [-3, 6.4]], biz_salon: [[-6, -7.4], [-2.5, -7.4], [1, -7.4], [4.5, -7.4]], biz_gym: [[6.5, 6.4], [3.5, 6.4], [-6.5, 6.4], [-3.5, 6.4]],
       }[id] || [],
     };

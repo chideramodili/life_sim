@@ -42,7 +42,7 @@ export function initBank(socket) {
     $('savings').textContent = i.open ? naira(i.bal) : 'No account';
 
     $('bankSavings').textContent = i.open ? naira(i.bal) : 'No account yet';
-    $('bankTier').textContent = i.open ? `${i.tier} account (holds up to ${naira(i.maxBalance)})` : 'Open a free account to save and borrow.';
+    $('bankTier').textContent = i.open ? `${i.tier} account (holds up to ${naira(i.maxBalance)}${i.unlimited ? ', and growing' : ''})` : 'Open a free account to save and borrow.';
     $('bankScore').textContent = `${i.score} (${i.scoreLabel})`;
     $('bankScoreFill').style.width = `${Math.round(((i.score - 300) / 550) * 100)}%`;
     $('bankHere').hidden = i.here;
@@ -54,8 +54,9 @@ export function initBank(socket) {
     $('bankInterest').textContent = i.open
       ? `Interest: ${(i.ratePerDay * 100).toFixed(1)}% a game day on savings above what you owe, for the first ${naira(i.interestCap)}. Next payout in ${span(i.interestIn)}.`
       : '';
-    $('bankNext').hidden = !(i.open && i.nextTier);
-    if (i.nextTier) $('bankNext').textContent = i.nextTier.inDays > 0 ? `Keep your account open ${i.nextTier.inDays} more game day${i.nextTier.inDays === 1 ? '' : 's'} to become ${i.nextTier.label} (bigger limit, bigger loans).` : '';
+    $('bankNext').hidden = !(i.open && (i.nextTier || i.unlimited));
+    if (i.unlimited && !i.nextTier) $('bankNext').textContent = `No ceiling: your limit grows with the money that moves through your account (₦${Math.round(i.flow).toLocaleString('en-NG')} so far) and with your level (${i.lvl}).`;
+    else if (i.nextTier) $('bankNext').textContent = i.nextTier.inDays > 0 ? `Keep your account open ${i.nextTier.inDays} more game day${i.nextTier.inDays === 1 ? '' : 's'} to become ${i.nextTier.label} (bigger limit, bigger loans).` : '';
 
     // Loan
     const L = i.loan;

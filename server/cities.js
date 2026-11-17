@@ -5,21 +5,21 @@
 export const CITIES = {
   lagos: {
     id: 'lagos', name: 'Lagos', seed: 20260, order: 0,
-    places: { market: 'Balogun Market', club: 'Island Night Club', hotel: 'Eko Grand Hotel', eventcenter: 'Lagoon Event Centre' },
+    places: { market: 'Balogun Market', club: 'Island Night Club', hotel: 'Eko Grand Hotel', eventcenter: 'Lagoon Event Centre', depot: 'Eko Express Depot' },
     theme: { grass: '#4f7a3a', tints: ['#ffffff', '#f3e3d0', '#dfe9f2', '#f2d9d0', '#e6f0dc', '#e9e2f4'],
       look: { pave: '#a8a39a', road: '#3a3a3f', roof: '#8a3f30', parks: ['#4f8a3c', '#5f9a48', '#6aa44f'], hscale: {}, landmarks: ['lagoon', 'billboards'], light: '#ffe2b8',
         walls: { apt: '#d99a3a', shop: '#e9b84f', house: '#f1c8a0', office: '#6fa8a0', tower: '#c9573f' } } },
   },
   abuja: {
     id: 'abuja', name: 'Abuja', seed: 41001, order: 1,
-    places: { market: 'Wuse Market', club: 'Maitama Lounge', hotel: 'Aso Grand Hotel', eventcenter: 'Unity Event Centre' },
+    places: { market: 'Wuse Market', club: 'Maitama Lounge', hotel: 'Aso Grand Hotel', eventcenter: 'Unity Event Centre', depot: 'Capital Courier Depot' },
     theme: { grass: '#5d8f45', tints: ['#ffffff', '#f4efe6', '#e8eef2', '#eeeeee', '#f6f1dc', '#e3ece4'],
       look: { pave: '#ddd8cc', road: '#2c2f36', roof: '#ece6d6', parks: ['#3f9a47', '#56b050', '#69bb5a'], hscale: { tower: 0.7, office: 0.75, apt: 0.85 }, landmarks: ['rock', 'domes', 'gardens'], light: '#e6f3ff', lots: { max: 20, gap: 12 },
         walls: { apt: '#f1ece0', shop: '#f6f1e4', house: '#fbf7ee', office: '#e4eaf0', tower: '#8fc2e8', civic: '#ffffff' } } },
   },
   enugu: {
     id: 'enugu', name: 'Enugu', seed: 77013, order: 2,
-    places: { market: 'Ogbete Market', club: 'Coal City Club', hotel: 'Hilltop Hotel', eventcenter: 'Miners Event Centre' },
+    places: { market: 'Ogbete Market', club: 'Coal City Club', hotel: 'Hilltop Hotel', eventcenter: 'Miners Event Centre', depot: 'Coal City Dispatch' },
     theme: { grass: '#7d8a3c', tints: ['#f0d9c0', '#e8c9a8', '#d9e4d0', '#f2e0cc', '#cfdde8', '#e9d4c4'],
       look: { pave: '#b88a68', road: '#4a3f3b', roof: '#a23c20', parks: ['#6a9a3a', '#86a944', '#9ab04c'], hscale: { tower: 0.5, office: 0.6, apt: 0.8 }, landmarks: ['hills', 'headframe', 'redearth'], light: '#f3e6cf', lots: { max: 24, gap: 12 },
         walls: { apt: '#8e3b25', shop: '#b8693f', house: '#c98a5c', office: '#7d6a5a', tower: '#6a7f78', civic: '#d2a56f' } } },

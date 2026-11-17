@@ -61,10 +61,10 @@ function fitArms(root, rig) {
 // ---- Arms reaching forward ----------------------------------------------------------------------------------------
 // Same idea as fitArms: find, once per model type, the angles that point each arm forward and a little down (for hands on handlebars).
 const fwdCache = {};
-export function fitForward(root, rig, drop = 0.35) {
+export function fitForward(root, rig, drop = 0.35, wheel = false) {
   const B = rig.bones, L = rig.rest.LeftArm;
   if (!L || !B.LeftForeArm || !B.RightForeArm || !B.RightArm || !B.LeftHand || !B.RightHand) return null;
-  const key = [L.e.x, L.e.y, L.e.z, rig.rest.RightArm.e.x, rig.rest.RightArm.e.y, rig.rest.RightArm.e.z, rig.rest.LeftForeArm.e.x, drop].map((n) => (typeof n === 'number' ? n.toFixed(3) : n)).join(',');
+  const key = [L.e.x, L.e.y, L.e.z, rig.rest.RightArm.e.x, rig.rest.RightArm.e.y, rig.rest.RightArm.e.z, rig.rest.LeftForeArm.e.x, drop, wheel ? 'w' : ''].map((n) => (typeof n === 'number' ? n.toFixed(3) : n)).join(',');
   if (fwdCache[key]) return fwdCache[key];
   root.updateMatrixWorld(true);
   _inv.copy(root.matrixWorld).invert();
@@ -80,7 +80,9 @@ export function fitForward(root, rig, drop = 0.35) {
       _q.setFromEuler(_e.set(ra.x + dx, ra.y + dy, ra.z + dz, ra.order)); arm.quaternion.copy(_q);
       arm.updateMatrixWorld(true);
       const d = dir(arm, fore);
-      const err = Math.abs(d.z - 0.93) + Math.abs(d.y + drop) * 1.2 + Math.abs(d.x * outward - 0.12);
+      const err = wheel   // hands on a steering wheel: upper arm hangs down and a little forward, forearm bends in and forward
+        ? Math.abs(d.z - 0.42) + Math.abs(d.y + 0.85) * 1.2 + Math.abs(d.x * outward - 0.05)
+        : Math.abs(d.z - 0.93) + Math.abs(d.y + drop) * 1.2 + Math.abs(d.x * outward - 0.12);
       if (!best || err < best.err) best = { err, dx, dy, dz };
     }
     arm.quaternion.setFromEuler(_e.set(ra.x + best.dx, ra.y + best.dy, ra.z + best.dz, ra.order));
@@ -90,7 +92,9 @@ export function fitForward(root, rig, drop = 0.35) {
       _q.setFromEuler(_e.set(rf.x + fx, rf.y, rf.z + fz, rf.order)); fore.quaternion.copy(_q);
       fore.updateMatrixWorld(true);
       const d = dir(fore, hand);
-      const err = Math.abs(d.z - 0.95) + Math.abs(d.y + drop * 0.6) + Math.abs(d.x * outward - 0.03);
+      const err = wheel
+        ? Math.abs(d.z - 0.82) + Math.abs(d.y + 0.35) + Math.abs(d.x * outward + 0.3)
+        : Math.abs(d.z - 0.95) + Math.abs(d.y + drop * 0.6) + Math.abs(d.x * outward - 0.03);
       if (!bf || err < bf.err) bf = { err, fx, fz };
     }
     out[side] = { a: [best.dx, best.dy, best.dz], f: [bf.fx, 0, bf.fz] };
@@ -193,7 +197,7 @@ export function exerciseTilt(kind, t) {
   const up = (Math.sin(t * 4.2) + 1) / 2;
   if (kind === 2) return { x: 1.42 - 0.3 * (1 - up) * 0.9, y: 0.0 };
   if (kind === 3) return { x: -1.5, y: 0.14 };
-  if (kind === 10) return { x: -1.5708, y: 0.86 };   // lying on your own (lower) bed at home
+  if (kind === 10) return { x: -1.5708, y: 1.0 };   // lying on your own (lower) bed at home
   if (kind === 9) return { x: -1.5708, y: 0.98 };   // lying on a hospital bed, face up, head towards the back wall
   return { x: 0, y: 0 };
 }

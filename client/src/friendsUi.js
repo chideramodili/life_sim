@@ -73,7 +73,7 @@ export function initFriends(socket) {
       row.append(b);
       here.append(row);
     }
-    $('moneyLimit').textContent = `You can send ₦${fmt(info.limits.min)} to ₦${fmt(info.limits.perSend)} at a time, up to ₦${fmt(info.limits.perDay)} a day.`;
+    $('moneyLimit').textContent = `You can send ₦${fmt(info.limits.min)} to ₦${fmt(info.limits.perSend)} at a time, up to ₦${fmt(info.limits.perDay)} a day. What a friend can receive depends on their own account. Limits grow as you earn, save and level up.`;
   }
 
   function paintChat() {

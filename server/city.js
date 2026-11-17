@@ -216,7 +216,7 @@ export function generateCity(seed = 20260) {
   ];
 
   // Two more public venues in towers: the Hotel and the Event Centre. Chosen by distance (no random numbers), so nothing else moves.
-  for (const [venue, tx, tz] of [['hotel', -62, -34], ['eventcenter', 66, 30]]) {
+  for (const [venue, tx, tz] of [['hotel', -62, -34], ['eventcenter', 66, 30], ['depot', 40, -34]]) {
     const towers = buildings.filter((b) => b.k === 'tower' && !b.v && b.w >= 8).sort((p, q) => Math.hypot(p.x - tx, p.z - tz) - Math.hypot(q.x - tx, q.z - tz));
     const b = towers[0];
     if (!b) continue;

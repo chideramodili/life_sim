@@ -148,6 +148,7 @@ function gableGeo(w, d, h) {
 const DEFAULT_TINTS = ['#ffffff', '#f3e3d0', '#dfe9f2', '#f2d9d0', '#e6f0dc', '#e9e2f4'];
 
 export function createCity(info) {
+  let beaconObj = null, beaconT = 0;
   const city = info.city;
   const TINTS = (info.theme && info.theme.tints) || DEFAULT_TINTS;
   const GRASS = (info.theme && info.theme.grass) || '#587a40';
@@ -856,6 +857,18 @@ export function createCity(info) {
     setCars,
     ...sigApi,
     // Friends' houses get a name sign above them (green dot when they are online).
+    // A glowing pillar over a delivery pickup or drop-off point (null clears it).
+    setBeacon(pt, color = '#ffb02e') {
+      if (beaconObj) { root.remove(beaconObj); beaconObj.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); beaconObj = null; }
+      if (!pt) return;
+      const g = new THREE.Group();
+      const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false });
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.6, 40, 20, 1, true), mat); pillar.position.y = 20;
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(2.6, 0.18, 8, 28), new THREE.MeshBasicMaterial({ color })); ring.rotation.x = Math.PI / 2; ring.position.y = 0.3;
+      const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.9, 1.6, 4), new THREE.MeshBasicMaterial({ color })); arrow.rotation.x = Math.PI; arrow.position.y = 5;
+      g.add(pillar, ring, arrow); g.position.set(pt.x, 0, pt.z); g.userData = { arrow, ring };
+      root.add(g); beaconObj = g;
+    },
     setFriendHomes(list) {
       for (const sp of friendSigns) { root.remove(sp); sp.material.map.dispose(); sp.material.dispose(); }
       friendSigns.length = 0;
@@ -942,6 +955,7 @@ export function createCity(info) {
     },
     setViewer(x, z) { viewerX = x; viewerZ = z; },
     update(dt) {
+      if (beaconObj) { beaconT += dt; beaconObj.userData.arrow.position.y = 5 + Math.sin(beaconT * 3) * 0.6; beaconObj.userData.ring.scale.setScalar(1 + Math.sin(beaconT * 4) * 0.08); }
       cullT += dt;
       if (cullT > 0.4) { cullT = 0; if (!viewerLast || Math.hypot(viewerX - viewerLast[0], viewerZ - viewerLast[1]) > 4) cullTrees(); }
       if (viaductTrains) viaductTrains.update(Date.now(), viewerX, viewerZ);

@@ -4,6 +4,8 @@
 // and "entries" are the lines for the transaction record. The caller applies the cash and writes the record.
 // All amounts are whole naira. All times are game minutes spent ONLINE (a game day is two real hours).
 
+import { parseProg, defaultProg, levelOf } from './progress.js';
+
 export const DAY = 1440;
 
 // ---------- Settings (placeholders to tune after watching testers) ----------
@@ -12,7 +14,9 @@ export const BANK = {
   maxTx: 1000000,              // largest single deposit or withdrawal
   ratePerDay: 0.005,           // 0.5% a game day, paid only on savings above what you owe
   interestCap: 400000,         // interest is only paid on the first 400,000 (so savings cannot snowball)
-  hardCap: 2000000,            // nobody can hold more than this
+  growBase: 2000000,           // a Trusted account starts able to hold this much...
+  growPerFlow: 0.5,            // ...and +₦0.50 for every ₦1 that has moved through the account (earned, saved, sent, received)
+  growPerLevel: 0.04,          // and +4% for every player level above 1. There is no ceiling.
   savingsCreditAt: 20000,      // holding this much earns a small credit-score nudge each interest day...
   savingsCreditMax: 650,       // ...but only up to this score
 };
@@ -60,6 +64,19 @@ export const LOAN = {
 };
 
 export const clampScore = (n) => Math.max(CREDIT.min, Math.min(CREDIT.max, Math.round(n)));
+// How much a bank can hold. New and Member accounts stay small on purpose; a Trusted account grows without a ceiling
+// as more money moves through it and as the player levels up (like a real bank raising your limits as you use the account).
+export function capacityOf(bank) {
+  const at = accountTier(bank);
+  if (at.id !== 'trusted') return at.maxBalance;
+  const lvl = levelOf(bank.prog ? bank.prog.xp : 0);
+  const raw = (BANK.growBase + BANK.growPerFlow * (bank.flow || 0)) * (1 + BANK.growPerLevel * (lvl - 1));
+  return Math.floor(raw / 10000) * 10000;
+}
+// The most you can deposit or withdraw in one go.
+export const maxTxOf = (bank) => Math.max(BANK.maxTx, Math.floor((capacityOf(bank) * 0.5) / 10000) * 10000);
+// Count money that passed through this account (raises the limits above).
+export const addFlow = (bank, n) => { if (Number.isFinite(n) && n > 0) bank.flow = (bank.flow || 0) + n; };
 export const accountTier = (bank) => {
   const days = bank.ageMin / DAY;
   let t = ACCOUNT_TIERS[0];
@@ -76,6 +93,8 @@ export const creditTier = (score) => {
 export function defaultBank() {
   return {
     open: false,
+    flow: 0,           // lifetime naira moved through the account; raises the limits
+    prog: defaultProg(),
     bal: 0,            // savings
     ageMin: 0,         // online minutes since the account was opened
     sinceInterest: 0,  // online minutes since interest was last paid
@@ -123,7 +142,9 @@ export function parseBank(json) {
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return d;
   d.open = raw.open === true;
-  d.bal = int(raw.bal, 0, BANK.hardCap * 2, 0);
+  d.bal = int(raw.bal, 0, 1e13, 0);
+  d.flow = num(raw.flow, 0, 1e14, 0);
+  d.prog = parseProg(raw.prog);
   d.ageMin = num(raw.ageMin, 0, 1e9, 0);
   d.sinceInterest = num(raw.sinceInterest, 0, DAY, 0);
   d.accr = num(raw.accr, 0, 1e7, 0);
@@ -164,35 +185,38 @@ export function openAccount(bank) {
   return done(0, [entry('open', 0, 0, 'Account opened')], 'Account opened. Welcome to the bank!');
 }
 
-function amountOk(amount) {
+function amountOk(amount, max = BANK.maxTx) {
   if (typeof amount !== 'number' || !Number.isSafeInteger(amount)) return 'Enter a whole number of naira.';
   if (amount < BANK.minTx) return `The smallest amount is ₦${BANK.minTx.toLocaleString('en-US')}.`;
-  if (amount > BANK.maxTx) return `The most in one go is ₦${BANK.maxTx.toLocaleString('en-US')}.`;
+  if (amount > max) return `The most in one go is ₦${max.toLocaleString('en-US')}.`;
   return '';
 }
 
 export function deposit(bank, cash, amount) {
   if (!bank.open) return fail('Open an account first.');
-  const bad = amountOk(amount);
+  const bad = amountOk(amount, maxTxOf(bank));
   if (bad) return fail(bad);
   if (cash < amount) return fail('You do not have that much cash.');
   const tier = accountTier(bank);
-  const room = tier.maxBalance - bank.bal;
+  const cap = capacityOf(bank);
+  const room = cap - bank.bal;
   if (amount > room) {
     return fail(room > 0
-      ? `A ${tier.label} account holds at most ₦${tier.maxBalance.toLocaleString('en-US')}. You can add ₦${room.toLocaleString('en-US')} more.`
-      : `A ${tier.label} account is full (₦${tier.maxBalance.toLocaleString('en-US')} limit). Keep using it and the limit grows.`);
+      ? `Your ${tier.label} account holds at most ₦${cap.toLocaleString('en-US')} for now. You can add ₦${room.toLocaleString('en-US')} more.`
+      : `Your ${tier.label} account is full (₦${cap.toLocaleString('en-US')} limit). Earn, save and send money and the limit keeps growing.`);
   }
   bank.bal += amount;
+  addFlow(bank, amount);
   return done(-amount, [entry('deposit', amount, -amount, 'Deposit')], `Deposited ₦${amount.toLocaleString('en-US')}.`);
 }
 
 export function withdraw(bank, amount) {
   if (!bank.open) return fail('Open an account first.');
-  const bad = amountOk(amount);
+  const bad = amountOk(amount, maxTxOf(bank));
   if (bad) return fail(bad);
   if (bank.bal < amount) return fail('You do not have that much in savings.');
   bank.bal -= amount;
+  addFlow(bank, amount);
   return done(amount, [entry('withdraw', -amount, amount, 'Withdrawal')], `Withdrew ₦${amount.toLocaleString('en-US')}.`);
 }
 
@@ -419,7 +443,10 @@ export function bankInfo(bank, here) {
     score: bank.score,
     scoreLabel: ct.label,
     tier: at.label,
-    maxBalance: at.maxBalance,
+    maxBalance: capacityOf(bank),
+    flow: Math.round(bank.flow || 0),
+    lvl: levelOf(bank.prog ? bank.prog.xp : 0),
+    unlimited: at.id === 'trusted',
     nextTier: nextTier ? { label: nextTier.label, inDays: Math.max(0, Math.ceil(nextTier.fromDays - bank.ageMin / DAY)) } : null,
     interestIn: bank.open ? Math.max(0, Math.round(DAY - bank.sinceInterest)) : 0,
     ratePerDay: BANK.ratePerDay,
@@ -427,7 +454,7 @@ export function bankInfo(bank, here) {
     loan,
     debt: bank.debt,
     offers: here ? loanOffers(bank) : { ok: false, why: 'Go to the Bank to borrow.', options: [] },
-    limits: { min: BANK.minTx, max: BANK.maxTx },
+    limits: { min: BANK.minTx, max: maxTxOf(bank) },
     garnish: LOAN.garnishRate,
   };
 }

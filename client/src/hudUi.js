@@ -30,6 +30,11 @@ export const APPS = [
   { id: 'bills', label: 'Bills', icon: '🧾', bg: 'linear-gradient(145deg,#8be0a8,#2f9e63)', click: 'billsBtn', badge: 'billsBadge' },
   { id: 'staff', label: 'Staff', icon: '🧑‍💼', bg: 'linear-gradient(145deg,#8fb4ff,#4a6fd0)', click: 'staffBtn', isNew: true, force: true },
   { id: 'props', label: 'Properties', icon: '🏘️', bg: 'linear-gradient(145deg,#ffcf6b,#e08a1f)', click: 'propsBtn', isNew: true, force: true },
+  { id: 'goals', label: 'Activities', icon: '🏆', bg: 'linear-gradient(145deg,#8ee08e,#2f9e5b)', click: 'goalsBtn', badge: 'goalsBadge', isNew: true, force: true },
+  { id: 'boards', label: 'Ranks', icon: '🏅', bg: 'linear-gradient(145deg,#ffd76b,#d6931c)', click: 'boardsBtn', isNew: true, force: true },
+  { id: 'party', label: 'Party', icon: '🎉', bg: 'linear-gradient(145deg,#ffb36b,#e0501f)', click: 'partyBtn', isNew: true, force: true },
+  { id: 'love', label: 'Love', icon: '💞', bg: 'linear-gradient(145deg,#ff9ac1,#e0356f)', click: 'loveBtn', isNew: true, force: true },
+  { id: 'taxi', label: 'Taxi', icon: '🚕', bg: 'linear-gradient(145deg,#ffe066,#e0a800)', click: 'taxiBtn', isNew: true, force: true },
   { id: 'skills', label: 'Skills', icon: '📈', bg: 'linear-gradient(145deg,#5fd6d0,#1f9aa0)', click: 'skillsBtn' },
   { id: 'look', label: 'Look', icon: '🎨', bg: 'linear-gradient(145deg,#c7a2ff,#7d4fe0)', click: 'lookBtn' },
   { id: 'story', label: 'Story', icon: '📖', bg: 'linear-gradient(145deg,#ffd36b,#d99a1c)', click: 'chip', force: true },
@@ -166,13 +171,13 @@ export function initHud(socket, look) {
     if (b && b.id !== 'logout' && !b.closest('#mailBox') && !b.classList.contains('closeX')) setTimeout(() => toggleMenu(false), 0);
   });
   setInterval(() => {
-    menuDot.hidden = !['billsBadge', 'peopleBadge', 'friendsBadge'].some((id) => $(id) && !$(id).hidden);
+    menuDot.hidden = !['billsBadge', 'peopleBadge', 'friendsBadge', 'goalsBadge'].some((id) => $(id) && !$(id).hidden);
   }, 800);
 
   // ----- action pills -----
   const actions = el('div');
   actions.id = 'actions';
-  for (const id of ['workBtn', 'workBtn2', 'workBtn3', 'jobsBtn', 'carsBtn', 'phoneBtn', 'laptopBtn', 'bankBtn', 'storeBtn', 'decoBtn', 'boutiqueBtn', 'wardrobeBtn', 'medBtn']) {
+  for (const id of ['workBtn', 'workBtn2', 'workBtn3', 'jobsBtn', 'carsBtn', 'phoneBtn', 'laptopBtn', 'bankBtn', 'deliveryBtn', 'storeBtn', 'decoBtn', 'boutiqueBtn', 'wardrobeBtn', 'medBtn']) {
     const b = $(id);
     if (b) actions.append(b);
   }

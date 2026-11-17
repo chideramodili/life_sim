@@ -48,6 +48,8 @@ export function initBiz(socket) {
       row.append(head, el('div', 'billWho', `${b.open ? 'Open now' : 'Closed now'} (${b.hours[0]}:00 to ${b.hours[1]}:00). Stock ${b.stock}/${b.cap}. Till ₦${fmt(b.till)}.`));
       row.append(el('div', 'billWho', `Customers pay ₦${fmt(b.price)} per ${b.item.toLowerCase()}. Each costs you ₦${fmt(b.cost)} from the wholesaler.`));
       if (b.auto) row.append(el('div', 'billWho', 'Automated: it restocks itself from the till when stock is half empty, pays its team from the till, and sends the profit to your wallet.'));
+      row.append(el('div', 'billWho', `Customer rating ${b.rep}/100 (${b.rep >= 50 ? '+' : ''}${Math.round((0.7 + 0.6 * b.rep / 100 - 1) * 100)}% customers).${b.promoLeft > 0 ? ` Promotion running: ${Math.ceil(b.promoLeft / 60)} min left.` : ''}`));
+      for (const d of b.duties || []) row.append(btn(d.wait > 0 ? `${d.label} · ${d.wait >= 60 ? Math.ceil(d.wait / 60) + ' min' : d.wait + ' s'}` : `${d.label} (${d.text})`, 'mini billPay', () => socket.emit('bizDuty', { id: i.id, duty: d.id }), d.wait > 0));
       row.append(el('div', 'billWho', `Team ${b.staff}/${b.staffMax}. Each adds ${b.boost}% more customers and costs ₦${fmt(b.wage)} an hour while open, paid from the till${b.owed > 0 ? ` (₦${fmt(b.owed)} unpaid)` : ''}.`));
       row.append(btn(`Hire someone · ₦${fmt(b.hireFee)}`, 'mini billPay', () => socket.emit('bizHire', i.id), b.staff >= b.staffMax));
       row.append(btn('Let one go', 'mini billPay', () => socket.emit('bizFire', i.id), b.staff <= 0));

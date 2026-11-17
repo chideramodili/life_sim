@@ -34,7 +34,7 @@ export const validName = (s) => typeof s === 'string' && NAME_RE.test(s.trim()) 
 export const isOpen = (kind, minuteOfDay) => { const [a, b] = KINDS[kind].hours; const h = minuteOfDay / 60; return h >= a && h < b; };
 
 // A new empty business record.
-export const newBiz = (kind, name, now) => ({ kind, name: name.trim(), level: 1, stock: 0, till: 0, frac: 0, built: now, staff: 0, owed: 0 });
+export const newBiz = (kind, name, now) => ({ kind, name: name.trim(), level: 1, stock: 0, till: 0, frac: 0, built: now, staff: 0, owed: 0, rep: 50, promoUntil: 0, cd: {} });
 
 // Wages: while the doors are open each staff member earns STAFF_WAGE per hour, taken from the till.
 // What the till cannot cover piles up as 'owed'; if it reaches two hours of wages for the whole team, one person quits.
@@ -54,10 +54,46 @@ export function hire(b, cash) {
   return { ok: true, cost: HIRE_FEE };
 }
 
+// Owner duties: do them inside your own business. Each has a cooldown (real seconds).
+export const PROMO_MULT = 1.8, PROMO_SECONDS = 600, PROMO_COST = 5000, TRAIN_COST = 8000;
+export const repMult = (b) => 0.7 + 0.6 * ((b.rep ?? 50) / 100);         // rating 0 = 30% fewer customers, 100 = 30% more
+export const DUTIES = {
+  clean: { label: 'Clean the shop', text: '+10 rating', cd: 180 },
+  serve: { label: 'Serve customers', text: 'Sell up to 5 items yourself right now', cd: 60 },
+  promo: { label: 'Run a promotion', text: `₦${PROMO_COST.toLocaleString('en-US')}: 80% more customers for 10 minutes`, cd: 1800 },
+  train: { label: 'Train the staff', text: `₦${TRAIN_COST.toLocaleString('en-US')}: +15 rating (needs a team member)`, cd: 1200 },
+};
+export const DUTY_IDS = Object.keys(DUTIES);
+export const dutyLeft = (b, id, now) => Math.max(0, Math.ceil((((b.cd || {})[id] || 0) + DUTIES[id].cd * 1000 - now) / 1000));
+// Does one duty. cash = the owner's cash, open = is the shop open. Returns { ok, why } or { ok, cost, msg, sold }.
+export function doDuty(b, id, cash, open, now) {
+  if (!DUTIES[id]) return { ok: false, why: 'Unknown task.' };
+  const w = dutyLeft(b, id, now);
+  if (w > 0) return { ok: false, why: `${DUTIES[id].label} again in ${w >= 60 ? Math.ceil(w / 60) + ' min' : w + ' s'}.` };
+  let cost = 0, sold = 0, msg = '';
+  if (id === 'clean') { b.rep = Math.min(100, (b.rep ?? 50) + 10); msg = 'You cleaned the shop. Rating +10.'; }
+  else if (id === 'serve') {
+    if (!open) return { ok: false, why: `${b.name} is closed.` };
+    sold = Math.min(5, b.stock);
+    if (sold <= 0) return { ok: false, why: 'Nothing in stock to sell.' };
+    b.stock -= sold; b.till += sold * priceOf(b.kind, b.level); msg = `You served ${sold} customer${sold > 1 ? 's' : ''}.`;
+  } else if (id === 'promo') {
+    if (cash < PROMO_COST) return { ok: false, why: `A promotion costs ₦${PROMO_COST.toLocaleString('en-US')}.` };
+    cost = PROMO_COST; b.promoUntil = now + PROMO_SECONDS * 1000; msg = 'Promotion running for 10 minutes: 80% more customers.';
+  } else if (id === 'train') {
+    if (!(b.staff > 0)) return { ok: false, why: 'Hire a team member first.' };
+    if (cash < TRAIN_COST) return { ok: false, why: `Training costs ₦${TRAIN_COST.toLocaleString('en-US')}.` };
+    cost = TRAIN_COST; b.rep = Math.min(100, (b.rep ?? 50) + 15); msg = 'Staff trained. Rating +15.';
+  }
+  b.cd = { ...(b.cd || {}), [id]: now };
+  return { ok: true, cost, sold, msg };
+}
+
 // Let time pass for one business: townspeople buy while it is open and there is stock. Returns how many were sold.
-export function step(b, dtSec, open) {
+export function step(b, dtSec, open, now = Date.now()) {
+  if (open && dtSec > 0) b.rep = Math.max(0, Math.min(100, (b.rep ?? 50) + (dtSec / 60) * (b.stock <= 0 ? -0.5 : 0.1)));   // a sold-out shop loses its good name, a stocked one slowly earns it
   if (!open || b.stock <= 0 || dtSec <= 0) return 0;
-  b.frac += (dtSec / 60) * KINDS[b.kind].rate * RATE_MULT(b.level) * (1 + STAFF_BOOST * (b.staff || 0)) * BIZ_RATE;
+  b.frac += (dtSec / 60) * KINDS[b.kind].rate * RATE_MULT(b.level) * (1 + STAFF_BOOST * (b.staff || 0)) * repMult(b) * (now < (b.promoUntil || 0) ? PROMO_MULT : 1) * BIZ_RATE;
   let n = Math.min(Math.floor(b.frac), b.stock);
   b.frac -= Math.floor(b.frac);
   if (n > 0) { b.stock -= n; b.till += n * priceOf(b.kind, b.level); }

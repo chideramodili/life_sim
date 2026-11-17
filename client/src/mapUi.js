@@ -12,7 +12,7 @@ const el = (tag, cls, text) => {
 // One icon per kind of place. Our own picks, not copied from anywhere.
 export const ICONS = {
   shop: '🛍️', boutique: '👗', homestore: '🛋️', pharmacy: '💊', jobs: '💼', market: '🧺', bank: '🏦', plaza: '⛲', police: '🚓',
-  gym: '🏋️', terminal: '🚆', hospital: '🏥', library: '📚', airport: '✈️', garage: '🚗', club: '🪩', hotel: '🏨', eventcenter: '🎤', home: '🏠',
+  gym: '🏋️', terminal: '🚆', hospital: '🏥', library: '📚', airport: '✈️', garage: '🚗', club: '🪩', hotel: '🏨', eventcenter: '🎤', depot: '🚚', home: '🏠',
 };
 export const iconOf = (id) => ICONS[id] || '📍';
 

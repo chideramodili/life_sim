@@ -472,8 +472,8 @@ function animateOld(group, dt, speed, heading, working, t, sitting = false, exer
       M.root.position.z += (tz - M.root.position.z) * Math.min(1, dt * 10);
       M.root.position.y += (seat.y - M.root.position.y) * Math.min(1, dt * 10);
       poseSit(M.rig, group, 0.45, 0.1);
-      if (M.fwd === undefined) M.fwd = fitForward(M.root, M.rig);
-      if (M.fwd) for (const side of ['Left', 'Right']) { turn(M.rig, side + 'Arm', ...M.fwd[side].a, 1); turn(M.rig, side + 'ForeArm', ...M.fwd[side].f, 1); }
+      if (M.wheel === undefined) M.wheel = fitForward(M.root, M.rig, 0.35, true);
+      if (M.wheel) for (const side of ['Left', 'Right']) { turn(M.rig, side + 'Arm', ...M.wheel[side].a, 1); turn(M.rig, side + 'ForeArm', ...M.wheel[side].f, 1); }
       turn(M.rig, 'Head', 0, 0, 0, 1);
       return;
     }
