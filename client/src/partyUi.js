@@ -48,7 +48,8 @@ export function initParty(socket, getStreet) {
       body.append(r);
     }
   };
-  socket.on('parties', (x) => { d = x; at = Date.now(); beacon(); if (!panel.hidden) paint(); });
+  let lastSig = '';
+  socket.on('parties', (x) => { d = x; at = Date.now(); beacon(); if (!panel.hidden) { const sg = JSON.stringify(x); if (sg === lastSig) return; lastSig = sg; const k = panel.scrollTop; paint(); panel.scrollTop = k; } });
   btn.addEventListener('click', () => { panel.hidden = false; paint(); socket.emit('partiesOpen'); });
   close.addEventListener('click', () => { panel.hidden = true; });
   setInterval(() => { if (!panel.hidden) { socket.emit('partiesOpen'); } }, 8000);

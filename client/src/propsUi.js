@@ -11,7 +11,7 @@ export function initProps(socket) {
   const panel = el('div', 'panel'); panel.id = 'propsPanel'; panel.hidden = true;
   const head = el('div', 'sheetHead'); head.append(el('span', '', 'Properties'));
   const close = el('button', 'closeX', '×'); close.setAttribute('aria-label', 'Close properties'); head.append(close);
-  const tabs = el('div', 'prTabs'); const tMine = el('button', 'prTab on', 'Mine'); const tMarket = el('button', 'prTab', 'For sale'); tabs.append(tMine, tMarket);
+  const tabs = el('div', 'prTabs'); const tMine = el('button', 'prTab on', 'Mine'); const tMarket = el('button', 'prTab', 'For sale'); const tRent = el('button', 'prTab', 'For rent'); tabs.append(tMine, tMarket, tRent);
   const body = el('div'); body.id = 'propsBody';
   panel.append(head, tabs, body, el('div', 'fine', 'Tills are collected at the property, unless it is automated (level 4), which sends you the profit by itself. To sell a lot to another player, stand at it and set a price.'));
   document.body.append(btn, panel);
@@ -24,10 +24,12 @@ export function initProps(socket) {
     + '.prBtn { margin-top: 8px; width: 100%; height: 38px; border: 0; border-radius: 10px; font-weight: 700; background: var(--hi); color: var(--on-hi); } .prBtn:disabled { opacity: .45; }';
   document.head.append(st);
 
-  let tab = 'mine', props = null, market = null;
+  let tab = 'mine', props = null, market = null, rentals = null;
+  const dayDraft = {};
+  const left = (secs, dayMs) => { const d = secs / (dayMs / 1000); return d >= 1 ? `${d.toFixed(1)} days left` : `${Math.max(1, Math.ceil(secs / 3600))} h left`; };
   const paint = () => {
     body.replaceChildren();
-    tMine.classList.toggle('on', tab === 'mine'); tMarket.classList.toggle('on', tab === 'market');
+    tMine.classList.toggle('on', tab === 'mine'); tMarket.classList.toggle('on', tab === 'market'); tRent.classList.toggle('on', tab === 'rent');
     if (tab === 'mine') {
       if (!props) return body.append(el('div', 'fine', 'Loading…'));
       if (!props.length) return body.append(el('div', 'fine', 'You do not own any land yet. Find a FOR SALE lot on the street, or look under For sale.'));
@@ -37,9 +39,33 @@ export function initProps(socket) {
           el('div', 'prMeta', `${p.cityName} · ${p.kind ? (p.auto ? 'Automated' : `Level ${p.level}`) : 'No business yet'} · worth ${naira(p.value)}`));
         if (p.kind) main.append(el('div', 'prMeta', p.auto ? 'Runs itself and sends you the profit.' : `Till ${naira(p.till)}`));
         if (p.ask) main.append(el('div', 'prMeta', `Listed for players at ${naira(p.ask)}`));
+        if (p.rentAsk) main.append(el('div', 'prMeta', `Listed for rent at ${naira(p.rentAsk)} a day`));
+        if (p.rentedOut) main.append(el('div', 'prMeta', `Rented to ${p.rentedOut.to} at ${naira(p.rentedOut.perDay)} a day · ${left(p.rentedOut.left, rentals ? rentals.dayMs : 86400000)}`));
+        if (p.rented) main.append(el('div', 'prMeta', `You rent it from ${p.rented.from} at ${naira(p.rented.perDay)} a day · ${left(p.rented.left, rentals ? rentals.dayMs : 86400000)} · deposit ${naira(p.rented.deposit)}`));
         const b = el('button', 'prBtn', p.here ? 'Go there' : `In ${p.cityName}`); b.disabled = !p.here;
         b.addEventListener('click', () => { socket.emit('propGo', { city: p.city, id: p.id }); panel.hidden = true; });
-        main.append(b); card.append(el('div', 'prIcon', KIND[p.kind] || '🏞️'), main); body.append(card);
+        main.append(b);
+        if (p.rented) {
+          const ex = el('button', 'prBtn', `Pay 1 more day (${naira(p.rented.perDay)})`); ex.addEventListener('click', () => socket.emit('rentExtend', { city: p.city, id: p.id, days: 1 }));
+          const en = el('button', 'prBtn', 'End the lease (get deposit and till back)'); en.addEventListener('click', () => { if (confirm('End the lease now? Unused days are not refunded.')) socket.emit('rentEnd', { city: p.city, id: p.id }); });
+          main.append(ex, en);
+        }
+        if (p.rentAsk) { const un = el('button', 'prBtn', 'Take off the rental list'); un.addEventListener('click', () => socket.emit('rentListing', { city: p.city, id: p.id, rent: 0 })); main.append(un); }
+        card.append(el('div', 'prIcon', KIND[p.kind] || '🏞️'), main); body.append(card);
+      }
+    } else if (tab === 'rent') {
+      if (!rentals) return body.append(el('div', 'fine', 'Loading…'));
+      body.append(el('div', 'fine', `You rent ${rentals.tenancies} of ${rentals.max} allowed. Pay the first days up front plus a deposit of one day's rent, which you get back. You run the business and keep its profit. When the lease ends, any stock left stays with the owner.`));
+      if (!rentals.list.length) return body.append(el('div', 'fine', 'No business is for rent right now.'));
+      for (const m of rentals.list) {
+        const key = m.city + m.id; if (!dayDraft[key]) dayDraft[key] = 3;
+        const card = el('div', 'prCard'), main = el('div', 'prMain');
+        main.append(el('div', 'prName', m.name), el('div', 'prMeta', `${m.cityName} · from ${m.owner} · ${m.auto ? 'Automated' : `Level ${m.level}`} · rating ${m.rep} · ${m.staff} staff · stock ${m.stock}/${m.cap}`));
+        const sel = el('select'); for (let d = 1; d <= rentals.maxDays; d++) { const o = el('option', '', `${d} day${d > 1 ? 's' : ''}`); o.value = d; if (d === dayDraft[key]) o.selected = true; sel.append(o); }
+        const b = el('button', 'prBtn'); const upd = () => { b.textContent = `Rent for ${naira(m.perDay * dayDraft[key] + m.perDay)} (${naira(m.perDay)} a day + deposit)`; }; upd();
+        sel.addEventListener('change', () => { dayDraft[key] = Number(sel.value); upd(); });
+        b.addEventListener('click', () => socket.emit('rentTake', { city: m.city, id: m.id, rent: m.perDay, days: dayDraft[key] }));
+        main.append(sel, b); card.append(el('div', 'prIcon', KIND[m.kind] || '🏪'), main); body.append(card);
       }
     } else {
       if (!market) return body.append(el('div', 'fine', 'Loading…'));
@@ -56,10 +82,12 @@ export function initProps(socket) {
   };
   socket.on('properties', (d) => { props = d.list; if (!panel.hidden) paint(); });
   socket.on('market', (d) => { market = d; if (!panel.hidden) paint(); });
+  socket.on('rentals', (d) => { rentals = d; if (!panel.hidden) paint(); });
   socket.on('marketDone', () => { socket.emit('marketOpen'); socket.emit('propsOpen'); });
-  const load = () => { socket.emit('propsOpen'); socket.emit('marketOpen'); };
+  const load = () => { socket.emit('propsOpen'); socket.emit('marketOpen'); socket.emit('rentOpen'); };
   tMine.addEventListener('click', () => { tab = 'mine'; paint(); });
   tMarket.addEventListener('click', () => { tab = 'market'; paint(); socket.emit('marketOpen'); });
+  tRent.addEventListener('click', () => { tab = 'rent'; paint(); socket.emit('rentOpen'); });
   btn.addEventListener('click', () => {
     const open = panel.hidden;
     if (open) hideOtherPanels('propsPanel');

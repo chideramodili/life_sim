@@ -46,6 +46,7 @@ export function initBiz(socket) {
       const head = el('div', 'skillHead');
       head.append(el('span', 'skillName', `${b.name} · ${b.label}`), el('span', 'tagc', b.auto ? 'Automated ★' : `Level ${b.level}`));
       row.append(head, el('div', 'billWho', `${b.open ? 'Open now' : 'Closed now'} (${b.hours[0]}:00 to ${b.hours[1]}:00). Stock ${b.stock}/${b.cap}. Till ₦${fmt(b.till)}.`));
+      if (i.tenant && i.rent) row.append(el('div', 'billWho', `Rented from ${i.owner} at ₦${fmt(i.rent.perDay)} a day. ${leftText(i.rent)} You keep the profit and run it. Extend or end the lease in Properties. Stock left in the shop stays with the owner.`));
       row.append(el('div', 'billWho', `Customers pay ₦${fmt(b.price)} per ${b.item.toLowerCase()}. Each costs you ₦${fmt(b.cost)} from the wholesaler.`));
       if (b.auto) row.append(el('div', 'billWho', 'Automated: it restocks itself from the till when stock is half empty, pays its team from the till, and sends the profit to your wallet.'));
       row.append(el('div', 'billWho', `Customer rating ${b.rep}/100 (${b.rep >= 50 ? '+' : ''}${Math.round((0.7 + 0.6 * b.rep / 100 - 1) * 100)}% customers).${b.promoLeft > 0 ? ` Promotion running: ${Math.ceil(b.promoLeft / 60)} min left.` : ''}`));
@@ -57,12 +58,16 @@ export function initBiz(socket) {
       row.append(btn('Fill the storeroom', 'mini billPay', () => socket.emit('bizStock', { id: i.id, n: b.cap - b.stock })));
       row.append(btn(`Collect ₦${fmt(b.till)}`, 'mini hot billPay', () => socket.emit('bizCollect', i.id), b.till <= 0));
       if (b.upgrade) row.append(btn(b.level + 1 >= b.maxLevel ? `Automate · ₦${fmt(b.upgrade)} (restocks itself, pays staff, sends you the profit)` : `Upgrade to level ${b.level + 1} · ₦${fmt(b.upgrade)}`, 'mini billPay', () => socket.emit('bizUpgrade', i.id)));
-      row.append(btn(`Sell to the game (₦${fmt(i.sell)} plus the till)`, 'mini billPay', () => socket.emit('lotSell', i.id)));
-      marketRow(row, i, btn);
+      if (!i.tenant) {
+        row.append(btn(`Sell to the game (₦${fmt(i.sell)} plus the till)`, 'mini billPay', () => socket.emit('lotSell', i.id)));
+        rentRow(row, i, btn);
+        marketRow(row, i, btn);
+      }
     } else if (i.biz) {
       const b = i.biz;
       const head = el('div', 'skillHead');
       head.append(el('span', 'skillName', b.name), el('span', 'tagc', b.label));
+      if (i.leasedOut && i.rent) row.append(el('div', 'billWho', `You rent this out to ${i.tenantName} at ₦${fmt(i.rent.perDay)} a day. ${leftText(i.rent)} It comes back to you when the lease ends.`));
       row.append(head, el('div', 'billWho', `Owned by ${i.owner}. ${b.open ? 'Open now' : `Closed (open ${b.hours[0]}:00 to ${b.hours[1]}:00)`}.`));
       row.append(btn(b.soldOut ? 'Sold out' : `Buy a ${b.item.toLowerCase()} · ₦${fmt(b.price)}`, 'mini hot billPay', () => socket.emit('bizBuy', i.id), b.soldOut || !b.open));
     } else {
@@ -71,6 +76,21 @@ export function initBiz(socket) {
     body.append(row);
   }
 
+  const leftText = (r) => { const d = r.left / (r.dayMs / 1000); return d >= 1 ? `${d.toFixed(1)} days left.` : `${Math.max(1, Math.ceil(r.left / 3600))} hour(s) left.`; };
+  let rentDraft = '';
+  // Renting your built business out: set a rent per day, a tenant pays up front and runs it. You keep the land and get the rent (minus 5%).
+  function rentRow(row, i, btn) {
+    if (i.ask) return;
+    if (i.rentAsk) {
+      row.append(el('div', 'billWho', `Listed for rent at ₦${fmt(i.rentAsk)} a day.`));
+      row.append(btn('Take it off the rental list', 'mini billPay', () => socket.emit('rentListing', { city: i.city, id: i.id, rent: 0 })));
+      return;
+    }
+    row.append(el('div', 'billWho', `Rent it out: pick ₦${fmt(i.rentMin)} to ₦${fmt(i.rentMax)} a day. The tenant runs it and keeps its profit; you cannot sell or run it while it is rented. You get the rent minus 5%.`));
+    const inp = el('input'); inp.type = 'number'; inp.inputMode = 'numeric'; inp.placeholder = 'Rent per day, e.g. 10000'; inp.value = rentDraft;
+    inp.addEventListener('input', () => { rentDraft = inp.value; });
+    row.append(inp, btn('List for rent', 'mini billPay', () => socket.emit('rentListing', { city: i.city, id: i.id, rent: Number(rentDraft) })));
+  }
   // Selling to another player: set a price, they buy it from the Properties app. The game keeps a small fee.
   function marketRow(row, i, btn) {
     if (i.ask) {

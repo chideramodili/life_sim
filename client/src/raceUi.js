@@ -49,6 +49,21 @@ export function initRace(socket, getStreet) {
     else if (m.finished) pill.textContent = `🏁 Finished in ${clock(m.myMs)}. Waiting for the others…`;
     else pill.textContent = `🏁 ${m.name} · checkpoint ${m.progress.done}/${m.progress.total} · ${clock(m.elapsedMs + ago)}`;
   };
+  // The server refreshes the lobby every second. Never rebuild the screen while a field is being typed in (it would drop the keyboard
+  // and your finger would land on a different button), and never rebuild when nothing changed.
+  let sig = '', pending = false, formErr = '';
+  const volatile = (k, v) => (k === 'elapsedMs' || k === 'goIn' ? undefined : v);
+  const editing = () => { const a = document.activeElement; return Boolean(a && body.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)); };
+  const repaint = (force = false) => {
+    const s2 = JSON.stringify(d, volatile) + '|' + showCreate + '|' + formErr;
+    if (!force && s2 === sig) return;
+    if (editing()) { pending = true; return; }
+    sig = s2; pending = false;
+    const keep = panel.scrollTop;
+    paint();
+    panel.scrollTop = keep;
+  };
+  body.addEventListener('focusout', () => setTimeout(() => { if (pending && !editing()) repaint(true); }, 250));
   function paint() {
     body.replaceChildren();
     if (!d) return body.append(el('div', 'fine', 'Loading…'));
@@ -77,7 +92,7 @@ export function initRace(socket, getStreet) {
       body.append(r);
     }
     if (m) return;
-    const cg = el('button', 'rcGo', showCreate ? 'Hide the form' : '➕ Create a race'); cg.addEventListener('click', () => { showCreate = !showCreate; paint(); }); body.append(cg);
+    const cg = el('button', 'rcGo', showCreate ? 'Hide the form' : '➕ Create a race'); cg.addEventListener('click', () => { showCreate = !showCreate; formErr = ''; repaint(true); }); body.append(cg);
     if (showCreate) {
       const f = el('div', 'rcRow'), c = d.cfg;
       const ni = el('input', 'rcIn'); ni.maxLength = 30; ni.placeholder = 'Race name'; ni.value = form.name; ni.addEventListener('input', () => (form.name = ni.value)); f.append(ni);
@@ -90,7 +105,13 @@ export function initRace(socket, getStreet) {
       field(f, 'Vehicle rule', sel(c.classes.map((x) => [x.id, x.label]), form.cls, (v) => (form.cls = v)));
       field(f, 'Who can join', sel([['public', 'Public (shown in the lobby)'], ['private', 'Private (join with a code)']], form.vis, (v) => (form.vis = v)));
       f.append(el('div', 'rcSub', 'Everyone stakes at least the minimum. Stakes are held safely and go back to you if the race is cancelled. Racers who do not finish lose their stake to the finishers.'));
-      const go = el('button', 'rcGo', 'Open the race'); go.style.marginTop = '8px'; go.style.width = '100%'; go.addEventListener('click', () => { socket.emit('raceCreate', { ...form }); showCreate = false; }); f.append(go);
+      const go = el('button', 'rcGo', 'Open the race'); go.style.marginTop = '8px'; go.style.width = '100%'; go.addEventListener('click', () => {
+        const nm = form.name.trim();
+        if (nm.length < 3) { formErr = 'Give the race a name first (at least 3 letters), then tap Open the race.'; repaint(true); return; }
+        formErr = ''; socket.emit('raceCreate', { ...form });
+      });
+      if (formErr) { const e = el('div', 'rcSub', formErr); e.style.color = '#ff8a98'; e.style.fontWeight = '700'; f.append(e); }
+      f.append(go);
       body.append(f);
     }
     body.append(el('div', 'rcTop', 'Open races in this city'));
@@ -110,9 +131,9 @@ export function initRace(socket, getStreet) {
     const pj = el('button', 'rcGo', 'Join with code'); pj.style.marginTop = '6px'; pj.style.width = '100%'; pj.addEventListener('click', () => socket.emit('raceJoin', { id: 'code', code, stake: pst })); pr.append(pj);
     body.append(pr);
   }
-  socket.on('race', (x) => { d = x; at = Date.now(); paintPill(); beacon(); if (!panel.hidden) paint(); });
+  socket.on('race', (x) => { d = x; at = Date.now(); paintPill(); beacon(); if (d && d.mine) { showCreate = false; formErr = ''; } if (!panel.hidden) repaint(); });
   socket.on('me', () => { if (!d) socket.emit('raceOpen'); });
-  btn.addEventListener('click', () => { panel.hidden = false; paint(); socket.emit('raceOpen'); });
+  btn.addEventListener('click', () => { panel.hidden = false; repaint(true); socket.emit('raceOpen'); });
   close.addEventListener('click', () => { panel.hidden = true; });
   setInterval(() => { paintPill(); if (!panel.hidden) socket.emit('raceOpen'); }, 1000);
 

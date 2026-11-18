@@ -51,6 +51,7 @@ import {
 import { DATE_COST, DATE_LOVE, DATE_COOLDOWN, MARRY_LOVE, RING, WEDDING_GIFT, DIVORCE_FEE, ASK_SECONDS, DATE_FX, coupleView, canMarry, stageName } from './love.js';
 import { PARTY_COST, PARTY_SECONDS, PARTY_RADIUS, PARTY_COOLDOWN_MS, GUEST_PAY, GUEST_CAP, TICK_FX, NAMES as PARTY_NAMES } from './party.js';
 import { FORMATS, CLASSES, SPLITS, START_RADIUS, COUNTDOWN_SECONDS, CP_REACH as RACE_REACH, FINISH_WINDOW_SECONDS, LOBBY_SECONDS, MAX_SPEED, checkConfig, makeRoute, totalCheckpoints, targetOf, raceSeconds, payouts, classOk, stakeXp, MIN_ENTRY_FLOOR, MIN_ENTRY_CAP, MAX_PLAYERS, MAX_LAPS } from './race.js';
+import { DAY_MS as RENT_DAY, RENT_MIN, RENT_MAX, MAX_DAYS as RENT_MAX_DAYS, MAX_TENANCIES, RENT_FEE, isRent, isDays, ownerNet as rentNet, startCost as rentStart, newLease, extend as rentExtendRule, parse as parseRent, stringify as rentText } from './rent.js';
 import { UPGRADES, UP_IDS, UP_MAX, upgradeCost, upOf, upTotal, GARAGE_COST, GARAGE_SLOTS, LOT_SLOTS, LOT_FEE, VALET_FEE, ZONE_RADIUS, parseGarage, lotsFor, zoneAt, parkedIn, isParked } from './garage.js';
 import { pickPeers, okSignal, CALL_RING_SECONDS } from './voice.js';
 import { buildBoards } from './boards.js';
@@ -398,7 +399,7 @@ db.exec(`
 
 // Upgrade older databases in place: add the new columns if they are missing.
 const existingColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
-for (const [n, d] of [['mgmt', "TEXT NOT NULL DEFAULT ''"], ['staff', 'INTEGER NOT NULL DEFAULT 0'], ['owed', 'REAL NOT NULL DEFAULT 0'], ['ask', 'INTEGER NOT NULL DEFAULT 0']]) {
+for (const [n, d] of [['mgmt', "TEXT NOT NULL DEFAULT ''"], ['staff', 'INTEGER NOT NULL DEFAULT 0'], ['owed', 'REAL NOT NULL DEFAULT 0'], ['ask', 'INTEGER NOT NULL DEFAULT 0'], ['lease', "TEXT NOT NULL DEFAULT ''"]]) {
   if (!db.prepare('PRAGMA table_info(lots)').all().some((c) => c.name === n)) db.exec(`ALTER TABLE lots ADD COLUMN ${n} ${d}`);
 }
 const addColumn = (name, ddl) => {
@@ -457,7 +458,7 @@ db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
 // Every query uses placeholders (?), so user input can never change the query itself.
 const q = {
   lotsAll: db.prepare('SELECT l.*, u.username AS ownerName FROM lots l JOIN users u ON u.id = l.owner'),
-  lotSet: db.prepare('INSERT OR REPLACE INTO lots (city, lot, owner, kind, name, level, stock, till, frac, built, staff, owed, ask, mgmt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  lotSet: db.prepare('INSERT OR REPLACE INTO lots (city, lot, owner, kind, name, level, stock, till, frac, built, staff, owed, ask, mgmt, lease) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   lotDel: db.prepare('DELETE FROM lots WHERE city = ? AND lot = ?'),
   userByName: db.prepare('SELECT * FROM users WHERE username = ?'),
   userById: db.prepare('SELECT * FROM users WHERE id = ?'),
@@ -1504,7 +1505,22 @@ function boardsFor(p) {
 }
 
 // ---------- Voice chat (rules in voice.js): proximity voice and friend calls. The audio goes phone to phone; the server picks who may connect. ----------
-const VOICE_ICE = [{ urls: 'stun:stun.l.google.com:19302' }, ...(process.env.VOICE_TURN_URL ? [{ urls: process.env.VOICE_TURN_URL.split(','), username: process.env.VOICE_TURN_USER || '', credential: process.env.VOICE_TURN_PASS || '' }] : [])];
+// Audio goes phone to phone. On many mobile networks (carrier NAT) that needs a relay (TURN). Three ways to give one:
+//  1) VOICE_TURN_URL / VOICE_TURN_USER / VOICE_TURN_PASS (any TURN service), or
+//  2) VOICE_METERED_URL = the full "credentials" link from a free metered.ca account (20 GB a month free); fetched at start and every hour.
+let VOICE_ICE = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }, ...(process.env.VOICE_TURN_URL ? [{ urls: process.env.VOICE_TURN_URL.split(','), username: process.env.VOICE_TURN_USER || '', credential: process.env.VOICE_TURN_PASS || '' }] : [])];
+const VOICE_STATIC = VOICE_ICE;
+async function refreshVoiceIce() {
+  const url = process.env.VOICE_METERED_URL;
+  if (!url) return;
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    const j = await r.json();
+    if (Array.isArray(j) && j.length && j.every((x) => x && x.urls)) { VOICE_ICE = [...VOICE_STATIC, ...j.slice(0, 8).map((x) => ({ urls: x.urls, username: x.username, credential: x.credential }))]; console.log(`Voice relay servers loaded (${j.length}).`); }
+  } catch (e) { console.log('Voice relay fetch failed:', e.message); }
+}
+refreshVoiceIce();
+setInterval(refreshVoiceIce, 3600000).unref();
 const voiceMuted = (a, b) => a.muted.has(b.userId) || b.muted.has(a.userId);
 const sendCall = (p) => {
   const c = p.call ? liveUser(p.call) : null;
@@ -2216,19 +2232,23 @@ const parseMgmt = (t) => { try { const m = JSON.parse(t || '{}'); return { rep: 
 for (const id of CITY_IDS) LOTS[id] = new Map();
 for (const r of q.lotsAll.all()) {
   if (!LOTS[r.city]) continue;
-  LOTS[r.city].set(r.lot, { owner: r.owner, ownerName: r.ownerName, ask: r.ask || 0, biz: r.kind && isKind(r.kind) ? { kind: r.kind, name: r.name || KINDS[r.kind].label, level: r.level, stock: r.stock, till: r.till, frac: r.frac, built: r.built, staff: r.staff || 0, owed: r.owed || 0, ...parseMgmt(r.mgmt) } : null });
+  const rr = parseRent(r.lease);
+  LOTS[r.city].set(r.lot, { owner: r.owner, ownerName: r.ownerName, ask: r.ask || 0, rentAsk: rr.ask, lease: rr.lease, biz: r.kind && isKind(r.kind) ? { kind: r.kind, name: r.name || KINDS[r.kind].label, level: r.level, stock: r.stock, till: r.till, frac: r.frac, built: r.built, staff: r.staff || 0, owed: r.owed || 0, ...parseMgmt(r.mgmt) } : null });
 }
 let lotsDirty = false;
 const saveLot = (city, id) => {
   const rec = LOTS[city].get(id);
   if (!rec) q.lotDel.run(city, id);
-  else { const b = rec.biz; q.lotSet.run(city, id, rec.owner, b ? b.kind : null, b ? b.name : null, b ? b.level : 1, b ? b.stock : 0, b ? Math.round(b.till) : 0, b ? b.frac : 0, b ? b.built : 0, b ? b.staff || 0 : 0, b ? b.owed || 0 : 0, rec.ask || 0, b ? JSON.stringify({ rep: Math.round((b.rep ?? 50) * 10) / 10, promoUntil: b.promoUntil || 0, cd: b.cd || {} }) : ''); }
+  else { const b = rec.biz; q.lotSet.run(city, id, rec.owner, b ? b.kind : null, b ? b.name : null, b ? b.level : 1, b ? b.stock : 0, b ? Math.round(b.till) : 0, b ? b.frac : 0, b ? b.built : 0, b ? b.staff || 0 : 0, b ? b.owed || 0 : 0, rec.ask || 0, b ? JSON.stringify({ rep: Math.round((b.rep ?? 50) * 10) / 10, promoUntil: b.promoUntil || 0, cd: b.cd || {} }) : '', rentText(rec.rentAsk, rec.lease)); }
 };
 // What a lot costs today: its starting price times how scarce land is in that city and how long land has been gaining value.
 // extra = -1 asks "what would it be after one more lot is back on the market".
 const cityLotCount = (city) => CITY_CTX[city].layout.lots.length;
 const landNow = (city, l, extra = 0) => lotPrice(l.price, landMult(Math.max(0, LOTS[city].size + extra), cityLotCount(city)));
 const sellToGame = (city, l, rec) => Math.round(landNow(city, l, -1) * SELL_TO_GAME) + (rec.biz ? Math.round(buildingValue(rec.biz) * BUILDING_BACK) : 0);
+// Who runs a business: the owner, or the tenant while it is rented out.
+const opId = (rec) => (rec.lease ? rec.lease.tenant : rec.owner);
+const tenancies = (userId) => { const out = []; for (const c of CITY_IDS) for (const [id, rec] of LOTS[c]) if (rec.lease && rec.lease.tenant === userId) out.push({ city: c, id, rec }); return out; };
 const lotWorth = (city, l, rec) => landNow(city, l, 0) + (rec.biz ? buildingValue(rec.biz) : 0);
 // Money for somebody who may be offline.
 const payUser = (userId, amount, text) => {
@@ -2237,7 +2257,7 @@ const payUser = (userId, amount, text) => {
 };
 const lotViews = (city) => CITY_CTX[city].layout.lots.map((l) => {
   const rec = LOTS[city].get(l.id);
-  return { id: l.id, owner: rec ? rec.ownerName : null, kind: rec && rec.biz ? rec.biz.kind : null, name: rec && rec.biz ? rec.biz.name : null, level: rec && rec.biz ? rec.biz.level : 0, soldOut: Boolean(rec && rec.biz && rec.biz.stock <= 0), ask: rec && rec.ask ? rec.ask : 0, price: rec ? 0 : landNow(city, l) };
+  return { id: l.id, owner: rec ? rec.ownerName : null, kind: rec && rec.biz ? rec.biz.kind : null, name: rec && rec.biz ? rec.biz.name : null, level: rec && rec.biz ? rec.biz.level : 0, soldOut: Boolean(rec && rec.biz && rec.biz.stock <= 0), ask: rec && rec.ask ? rec.ask : 0, rent: rec && rec.rentAsk && !rec.lease ? rec.rentAsk : 0, leased: Boolean(rec && rec.lease), price: rec ? 0 : landNow(city, l) };
 });
 const sendLots = (p) => p.socket.emit('lots', { city: p.city, list: lotViews(p.city) });
 const broadcastLots = (city) => { const key = spaceKey('street', 0, city); if (io.sockets.adapter.rooms.has(key)) io.to(key).emit('lots', { city, list: lotViews(city) }); };
@@ -2254,13 +2274,14 @@ function bizInfo(p, id) {
   const l = ctxOf(p).layout.lots[id];
   if (!l) return null;
   const rec = LOTS[p.city].get(id);
-  const mine = Boolean(rec && rec.owner === p.userId);
-  const info = { id, price: landNow(p.city, l), sell: rec && mine ? sellToGame(p.city, l, rec) : 0, ask: rec && mine ? rec.ask || 0 : 0, value: rec && mine ? lotWorth(p.city, l, rec) : 0, owner: rec ? rec.ownerName : null, mine, owned: LOTS_OWNED(p), max: MAX_LOTS, kinds: [] };
+  const own = Boolean(rec && rec.owner === p.userId);
+  const mine = Boolean(rec && opId(rec) === p.userId);
+  const info = { id, city: p.city, price: landNow(p.city, l), sell: rec && own && !rec.lease ? sellToGame(p.city, l, rec) : 0, ask: rec && own ? rec.ask || 0 : 0, value: rec && own ? lotWorth(p.city, l, rec) : 0, owner: rec ? rec.ownerName : null, mine, tenant: Boolean(mine && !own), leasedOut: Boolean(own && rec.lease), tenantName: rec && rec.lease ? rec.lease.tenantName : null, rentAsk: rec && own && !rec.lease ? rec.rentAsk || 0 : 0, rent: rec && rec.lease && (own || mine) ? { perDay: rec.lease.rent, left: Math.max(0, Math.round((rec.lease.until - Date.now()) / 1000)), dayMs: RENT_DAY } : null, rentMin: RENT_MIN, rentMax: RENT_MAX, owned: LOTS_OWNED(p), max: MAX_LOTS, kinds: [] };
   if (mine && !rec.biz) info.kinds = KIND_IDS.map((k) => ({ id: k, label: KINDS[k].label, build: KINDS[k].build, item: KINDS[k].item, price: KINDS[k].price }));
   if (rec && rec.biz) {
     const b = rec.biz;
     info.biz = { kind: b.kind, label: KINDS[b.kind].label, name: b.name, level: b.level, item: KINDS[b.kind].item, price: priceOf(b.kind, b.level), open: bizOpenNow(b.kind, minuteOfDay()), hours: KINDS[b.kind].hours, soldOut: b.stock <= 0, staff: b.staff || 0 };
-    if (mine) Object.assign(info.biz, { stock: b.stock, cap: STOCK_CAP(b.level), till: Math.round(b.till), cost: KINDS[b.kind].cost, upgrade: b.level < BIZ_MAX_LEVEL ? UPGRADE_COST[b.level + 1] : null, maxLevel: BIZ_MAX_LEVEL, staffMax: STAFF_MAX(b.level), wage: STAFF_WAGE, hireFee: HIRE_FEE, boost: Math.round(STAFF_BOOST * 100), owed: Math.round(b.owed || 0), auto: isAuto(b), rep: Math.round(b.rep ?? 50), promoLeft: Math.max(0, Math.ceil(((b.promoUntil || 0) - Date.now()) / 1000)), duties: DUTY_IDS.map((d) => ({ id: d, label: DUTIES[d].label, text: DUTIES[d].text, wait: dutyLeft(b, d, Date.now()) })) });
+    if (mine) Object.assign(info.biz, { stock: b.stock, cap: STOCK_CAP(b.level), till: Math.round(b.till), cost: KINDS[b.kind].cost, upgrade: own && b.level < BIZ_MAX_LEVEL ? UPGRADE_COST[b.level + 1] : null, maxLevel: BIZ_MAX_LEVEL, staffMax: STAFF_MAX(b.level), wage: STAFF_WAGE, hireFee: HIRE_FEE, boost: Math.round(STAFF_BOOST * 100), owed: Math.round(b.owed || 0), auto: isAuto(b), rep: Math.round(b.rep ?? 50), promoLeft: Math.max(0, Math.ceil(((b.promoUntil || 0) - Date.now()) / 1000)), duties: DUTY_IDS.map((d) => ({ id: d, label: DUTIES[d].label, text: DUTIES[d].text, wait: dutyLeft(b, d, Date.now()) })) });
   }
   return info;
 }
@@ -2268,6 +2289,21 @@ const LOTS_OWNED = (p) => { let n = 0; for (const rec of LOTS[p.city].values()) 
 // Staff figures are drawn from the room info, so people standing inside get a fresh copy when the team changes.
 const refreshInside = (p, id) => { for (const o of players.values()) if (o.room === 'biz' && o.city === p.city && o.bizLot === id) o.socket.emit('room', roomInfo('biz', o)); };
 const sendBiz = (p, id) => { const i = bizInfo(p, id); if (i) p.socket.emit('biz', i); };
+// A lease ends (ran out, or the tenant left). The tenant gets the deposit and whatever is in the till; the owner takes the business back.
+function endLease(city, id, rec, why) {
+  const L = rec.lease;
+  if (!L) return;
+  const till = rec.biz ? Math.round(rec.biz.till) : 0;
+  const back = L.deposit + till;
+  const name = rec.biz ? rec.biz.name : 'the property';
+  if (rec.biz) rec.biz.till = 0;
+  rec.lease = null; rec.rentAsk = 0;
+  payUser(L.tenant, back, `Your lease on ${name} ${why}. You got your ₦${L.deposit.toLocaleString('en-US')} deposit${till ? ` and ₦${till.toLocaleString('en-US')} from the till` : ''} back.`);
+  payUser(rec.owner, 0, `${L.tenantName}'s lease on ${name} ${why}. It is yours to run again (the rental listing is off).`);
+  saveLot(city, id);
+  broadcastLots(city);
+  for (const o of players.values()) if (o.city === city && o.room === 'biz' && o.bizLot === id) { o.socket.emit('room', roomInfo('biz', o)); sendBiz(o, id); }
+}
 // Townspeople buy while a business is open and has stock. Runs every few seconds, whether or not anyone is online.
 let lastBizTick = Date.now();
 setInterval(() => {
@@ -2278,12 +2314,13 @@ setInterval(() => {
   for (const city of CITY_IDS) {
     let changed = false;
     for (const [id, rec] of LOTS[city]) {
+      if (rec.lease && rec.lease.until <= now) { endLease(city, id, rec, 'ran out'); changed = true; }
       if (!rec.biz) continue;
       const open = bizOpenNow(rec.biz.kind, mod);
       const sold = bizStep(rec.biz, dt, open);
       if (rec.biz.staff) {
         lotsDirty = true;
-        if (payStaff(rec.biz, dt, open)) { const ow = [...players.values()].find((o) => o.userId === rec.owner); if (ow) notice(ow, `${rec.biz.name} could not pay its wages and a staff member quit.`); }
+        if (payStaff(rec.biz, dt, open)) { const ow = [...players.values()].find((o) => o.userId === opId(rec)); if (ow) notice(ow, `${rec.biz.name} could not pay its wages and a staff member quit.`); }
       }
       if (isAuto(rec.biz)) {
         const r = bizAutoStep(rec.biz);
@@ -2291,8 +2328,8 @@ setInterval(() => {
         // Send the profit to the owner, at most once a minute so the notices do not pile up.
         if (r.send && now - (rec.biz.lastSend || 0) > 60000) {
           rec.biz.lastSend = now; rec.biz.till -= r.send; lotsDirty = true;
-          payUser(rec.owner, r.send, `You earned ₦${r.send.toLocaleString('en-US')} from ${rec.biz.name}.`);
-          { const ow = liveUser(rec.owner); if (ow) { addFlow(ow.bank, r.send); progGain(ow, 'earn', r.send); } }
+          payUser(opId(rec), r.send, `You earned ₦${r.send.toLocaleString('en-US')} from ${rec.biz.name}.`);
+          { const ow = liveUser(opId(rec)); if (ow) { addFlow(ow.bank, r.send); progGain(ow, 'earn', r.send); } }
         }
       }
       if (sold > 0) { lotsDirty = true; if (rec.biz.stock <= 0) changed = true; }
@@ -3126,7 +3163,7 @@ io.on('connection', (socket) => {
     if (!l) return;
     const rec = LOTS[p.city].get(id);
     if (!rec || !rec.biz) return notice(p, 'Nothing is built here yet.');
-    if (rec.owner !== p.userId && !bizOpenNow(rec.biz.kind, minuteOfDay())) return notice(p, `${rec.biz.name} is closed.`);
+    if (opId(rec) !== p.userId && !bizOpenNow(rec.biz.kind, minuteOfDay())) return notice(p, `${rec.biz.name} is closed.`);
     let n = 0;
     for (const o of players.values()) if (o.room === 'biz' && o.city === p.city && o.bizLot === id) n++;
     if (n >= ROOMS.biz.cap) return notice(p, `${rec.biz.name} is full right now.`);
@@ -3153,6 +3190,7 @@ io.on('connection', (socket) => {
     if (!l) return;
     const rec = LOTS[p.city].get(id);
     if (!rec || rec.owner !== p.userId) return notice(p, 'That is not your lot.');
+    if (rec.lease || rec.rentAsk) return notice(p, 'Take it off the rental list and wait for any lease to end first.');
     const back = sellToGame(p.city, l, rec) + (rec.biz ? Math.round(rec.biz.till) : 0);
     p.cash += back;
     LOTS[p.city].delete(id);
@@ -3182,7 +3220,7 @@ io.on('connection', (socket) => {
     const l = lotNear(p, id);
     if (!l) return null;
     const rec = LOTS[p.city].get(id);
-    if (!rec || rec.owner !== p.userId || !rec.biz) { notice(p, 'You do not own a business here.'); return null; }
+    if (!rec || opId(rec) !== p.userId || !rec.biz) { notice(p, rec && rec.lease && rec.owner === p.userId ? `It is rented to ${rec.lease.tenantName} right now.` : 'You do not run a business here.'); return null; }
     return rec;
   };
   socket.on('bizStock', (req) => {
@@ -3250,6 +3288,7 @@ io.on('connection', (socket) => {
   socket.on('bizUpgrade', (id) => {
     const rec = myBiz(id);
     if (!rec) return;
+    if (rec.owner !== p.userId) return notice(p, 'Only the owner can upgrade the building.');
     if (rec.biz.level >= BIZ_MAX_LEVEL) return notice(p, 'It is already at the top level.');
     const cost = UPGRADE_COST[rec.biz.level + 1];
     if (p.cash < cost) return notice(p, `The upgrade costs ₦${cost.toLocaleString('en-US')}.`);
@@ -3266,7 +3305,7 @@ io.on('connection', (socket) => {
     if (!l) return;
     const rec = LOTS[p.city].get(id);
     if (!rec || !rec.biz) return notice(p, 'There is nothing to buy here.');
-    if (rec.owner === p.userId) return notice(p, 'It is your own shop. Collect from the till instead.');
+    if (opId(rec) === p.userId) return notice(p, 'It is your own shop. Collect from the till instead.');
     const b = rec.biz;
     if (!bizOpenNow(b.kind, minuteOfDay())) return notice(p, `${b.name} is closed.`);
     if (b.stock <= 0) return notice(p, `${b.name} has sold out.`);
@@ -3289,9 +3328,10 @@ io.on('connection', (socket) => {
   const propsOf = () => {
     const out = [];
     for (const c of CITY_IDS) for (const [id, rec] of LOTS[c]) {
-      if (rec.owner !== p.userId) continue;
+      const own = rec.owner === p.userId, rented = Boolean(rec.lease && rec.lease.tenant === p.userId);
+      if (!own && !rented) continue;
       const l = CITY_CTX[c].layout.lots[id];
-      out.push({ city: c, cityName: CITIES[c].name, id, kind: rec.biz ? rec.biz.kind : null, name: rec.biz ? rec.biz.name : null, level: rec.biz ? rec.biz.level : 0, auto: Boolean(rec.biz && isAuto(rec.biz)), till: rec.biz ? Math.round(rec.biz.till) : 0, value: lotWorth(c, l, rec), ask: rec.ask || 0, here: c === p.city });
+      out.push({ city: c, cityName: CITIES[c].name, id, kind: rec.biz ? rec.biz.kind : null, name: rec.biz ? rec.biz.name : null, level: rec.biz ? rec.biz.level : 0, auto: Boolean(rec.biz && isAuto(rec.biz)), till: rec.biz && !(own && rec.lease) ? Math.round(rec.biz.till) : 0, value: own ? lotWorth(c, l, rec) : 0, ask: own ? rec.ask || 0 : 0, here: c === p.city, rentAsk: own ? rec.rentAsk || 0 : 0, rentedOut: own && rec.lease ? { to: rec.lease.tenantName, perDay: rec.lease.rent, left: Math.max(0, Math.round((rec.lease.until - Date.now()) / 1000)) } : null, rented: rented ? { from: rec.ownerName, perDay: rec.lease.rent, left: Math.max(0, Math.round((rec.lease.until - Date.now()) / 1000)), deposit: rec.lease.deposit } : null });
     }
     return out;
   };
@@ -3654,7 +3694,7 @@ io.on('connection', (socket) => {
   socket.on('propGo', (req) => {
     if (!req || typeof req !== 'object' || !CITY_CTX[req.city]) return;
     const rec = LOTS[req.city].get(req.id);
-    if (!rec || rec.owner !== p.userId) return notice(p, 'That is not your property.');
+    if (!rec || (rec.owner !== p.userId && !(rec.lease && rec.lease.tenant === p.userId))) return notice(p, 'That is not your property.');
     if (p.trip || p.drive || jailLeft(p) || p.shift) return notice(p, 'Not right now.');
     if (req.city !== p.city) return notice(p, `That property is in ${CITIES[req.city].name}. Travel there first.`);
     const l = CITY_CTX[req.city].layout.lots[req.id];
@@ -3677,6 +3717,7 @@ io.on('connection', (socket) => {
     if (!l) return;
     const rec = LOTS[p.city].get(req.id);
     if (!rec || rec.owner !== p.userId) return notice(p, 'That is not your lot.');
+    if (rec.lease || rec.rentAsk) return notice(p, 'Take it off the rental list and wait for any lease to end first.');
     const ask = Math.round(Number(req.ask));
     if (!ask) { rec.ask = 0; saveLot(p.city, req.id); broadcastLots(p.city); sendBiz(p, req.id); return notice(p, 'Taken off the market.'); }
     const worth = lotWorth(p.city, l, rec);
@@ -3690,7 +3731,7 @@ io.on('connection', (socket) => {
   socket.on('marketOpen', () => {
     const out = [];
     for (const c of CITY_IDS) for (const [id, rec] of LOTS[c]) {
-      if (!rec.ask || rec.owner === p.userId) continue;
+      if (!rec.ask || rec.owner === p.userId || rec.lease) continue;
       out.push({ city: c, cityName: CITIES[c].name, id, seller: rec.ownerName, ask: rec.ask, kind: rec.biz ? rec.biz.kind : null, name: rec.biz ? rec.biz.name : null, level: rec.biz ? rec.biz.level : 0, auto: Boolean(rec.biz && isAuto(rec.biz)) });
     }
     out.sort((a, b) => a.ask - b.ask);
@@ -3699,14 +3740,14 @@ io.on('connection', (socket) => {
   socket.on('marketBuy', (req) => {
     if (!req || typeof req !== 'object' || !CITY_CTX[req.city]) return;
     const rec = LOTS[req.city].get(req.id);
-    if (!rec || !rec.ask) return notice(p, 'That lot is no longer for sale.');
+    if (!rec || !rec.ask || rec.lease) return notice(p, 'That lot is no longer for sale.');
     if (rec.owner === p.userId) return notice(p, 'That is your own lot.');
     if (req.ask !== rec.ask) return notice(p, 'The price just changed. Look again.');
     if (LOTS_OWNED(p) >= MAX_LOTS) return notice(p, `You can own at most ${MAX_LOTS} lots.`);
     if (p.cash < rec.ask) return notice(p, `That lot costs ₦${rec.ask.toLocaleString('en-US')}.`);
     const price = rec.ask, seller = rec.owner, what = rec.biz ? rec.biz.name : 'a lot';
     p.cash -= price;
-    rec.owner = p.userId; rec.ownerName = p.name; rec.ask = 0;
+    rec.owner = p.userId; rec.ownerName = p.name; rec.ask = 0; rec.rentAsk = 0;
     for (const o of [...players.values()]) if (o.room === 'biz' && o.city === req.city && o.bizLot === req.id && o.userId !== p.userId) { const l = CITY_CTX[req.city].layout.lots[req.id]; moveNow(o, 'street', l.door.x, l.door.z, req.city); notice(o, 'The business changed hands. You were shown out.'); }
     saveLot(req.city, req.id);
     payUser(seller, marketNet(price), `${p.name} bought ${what} for ₦${price.toLocaleString('en-US')}. You received ₦${marketNet(price).toLocaleString('en-US')}.`);
@@ -3714,6 +3755,79 @@ io.on('connection', (socket) => {
     broadcastLots(req.city);
     sendProps();
     socket.emit('marketDone');
+  });
+
+  // ----- Renting businesses to other players -----
+  const rentRec = (req) => { if (!req || typeof req !== 'object' || !CITY_CTX[req.city]) return null; const rec = LOTS[req.city].get(req.id); return rec || null; };
+  const rentList = () => {
+    const out = [];
+    for (const c of CITY_IDS) for (const [id, rec] of LOTS[c]) {
+      if (!rec.rentAsk || rec.lease || !rec.biz || rec.owner === p.userId) continue;
+      out.push({ city: c, cityName: CITIES[c].name, id, owner: rec.ownerName, perDay: rec.rentAsk, kind: rec.biz.kind, name: rec.biz.name, level: rec.biz.level, auto: isAuto(rec.biz), stock: rec.biz.stock, cap: STOCK_CAP(rec.biz.level), staff: rec.biz.staff || 0, rep: Math.round(rec.biz.rep ?? 50), cost: rentStart(rec.rentAsk, 1) });
+    }
+    out.sort((a, b) => a.perDay - b.perDay);
+    return out.slice(0, 60);
+  };
+  const sendRentals = () => socket.emit('rentals', { list: rentList(), tenancies: tenancies(p.userId).length, max: MAX_TENANCIES, min: RENT_MIN, maxRent: RENT_MAX, maxDays: RENT_MAX_DAYS, dayMs: RENT_DAY, fee: RENT_FEE });
+  socket.on('rentOpen', () => { if (allow(p.socialTimes, 12, 10000)) sendRentals(); });
+  socket.on('rentListing', (req) => {
+    const rec = rentRec(req);
+    if (!rec || rec.owner !== p.userId) return notice(p, 'That is not your property.');
+    if (!rec.biz) return notice(p, 'Build a business on it first. Only built businesses can be rented.');
+    if (rec.lease) return notice(p, 'It is rented out right now.');
+    const rent = Math.round(Number(req.rent));
+    if (!rent) { rec.rentAsk = 0; saveLot(req.city, req.id); broadcastLots(req.city); sendProps(); return notice(p, 'Taken off the rental list.'); }
+    if (rec.ask) return notice(p, 'It is listed for sale. Take it off the market first.');
+    if (!isRent(rent)) return notice(p, `Rent per day must be ₦${RENT_MIN.toLocaleString('en-US')} to ₦${RENT_MAX.toLocaleString('en-US')}.`);
+    rec.rentAsk = rent;
+    saveLot(req.city, req.id);
+    notice(p, `Listed for rent at ₦${rent.toLocaleString('en-US')} a day. You get ${Math.round((1 - RENT_FEE) * 100)}% of each payment. The tenant runs it and keeps its profit.`);
+    broadcastLots(req.city);
+    sendProps();
+  });
+  socket.on('rentTake', (req) => {
+    const rec = rentRec(req);
+    if (!rec || !rec.rentAsk || rec.lease || !rec.biz) return notice(p, 'That property is not for rent any more.');
+    if (rec.owner === p.userId) return notice(p, 'That is your own property.');
+    if (req.rent !== rec.rentAsk) return notice(p, 'The rent just changed. Look again.');
+    const days = Math.round(Number(req.days));
+    if (!isDays(days)) return notice(p, `Pick 1 to ${RENT_MAX_DAYS} days.`);
+    if (tenancies(p.userId).length >= MAX_TENANCIES) return notice(p, `You can rent at most ${MAX_TENANCIES} businesses.`);
+    const cost = rentStart(rec.rentAsk, days);
+    if (p.cash < cost) return notice(p, `That costs ₦${cost.toLocaleString('en-US')} (${days} day${days > 1 ? 's' : ''} plus a ₦${rec.rentAsk.toLocaleString('en-US')} deposit you get back).`);
+    const rentPaid = rec.rentAsk * days;
+    p.cash -= cost;
+    rec.lease = newLease(p.userId, p.name, rec.rentAsk, days, Date.now());
+    rec.rentAsk = 0;
+    const net = rentNet(rentPaid);
+    payUser(rec.owner, net, `${p.name} rented ${rec.biz.name} for ${days} day${days > 1 ? 's' : ''}. You received ₦${net.toLocaleString('en-US')}.`);
+    { const ow = liveUser(rec.owner); if (ow) { addFlow(ow.bank, net); progGain(ow, 'earn', net); progGain(ow, 'lease', 1); } }
+    progGain(p, 'rent', 1);
+    saveLot(req.city, req.id);
+    notice(p, `You rented ${rec.biz.name}. Go there to run it. Order stock, hire staff and collect the till.`);
+    broadcastLots(req.city);
+    sendProps(); sendRentals();
+  });
+  socket.on('rentExtend', (req) => {
+    const rec = rentRec(req);
+    if (!rec || !rec.lease || rec.lease.tenant !== p.userId) return notice(p, 'You are not renting that.');
+    const r = rentExtendRule(rec.lease, Math.round(Number(req.days)), Date.now());
+    if (!r.ok) return notice(p, r.why);
+    if (p.cash < r.cost) return notice(p, `That costs ₦${r.cost.toLocaleString('en-US')}.`);
+    p.cash -= r.cost;
+    rec.lease.until = r.until;
+    const net = rentNet(r.cost);
+    payUser(rec.owner, net, `${p.name} paid ₦${net.toLocaleString('en-US')} more rent for ${rec.biz ? rec.biz.name : 'your property'}.`);
+    { const ow = liveUser(rec.owner); if (ow) { addFlow(ow.bank, net); progGain(ow, 'earn', net); } }
+    saveLot(req.city, req.id);
+    notice(p, 'Lease extended.');
+    sendProps();
+  });
+  socket.on('rentEnd', (req) => {
+    const rec = rentRec(req);
+    if (!rec || !rec.lease || rec.lease.tenant !== p.userId) return notice(p, 'You are not renting that.');
+    endLease(req.city, req.id, rec, 'ended');
+    sendProps(); sendRentals();
   });
 
   socket.on('laptopsOpen', () => sendLaptops(p));

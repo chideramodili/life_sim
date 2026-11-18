@@ -76,7 +76,8 @@ export function initGarage(socket, getStreet) {
       body.append(r);
     }
   }
-  socket.on('garage', (x) => { d = x; if (!panel.hidden) paint(); });
+  let lastSig = '';
+  socket.on('garage', (x) => { d = x; if (!panel.hidden) { const sg = JSON.stringify(x); if (sg === lastSig) return; lastSig = sg; const k = panel.scrollTop; paint(); panel.scrollTop = k; } });
   btn.addEventListener('click', () => { panel.hidden = false; paint(); socket.emit('garageOpen'); });
   close.addEventListener('click', () => { panel.hidden = true; });
   setInterval(() => { if (!panel.hidden) socket.emit('garageOpen'); }, 3000);

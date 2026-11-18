@@ -66,7 +66,8 @@ export function initLove(socket) {
       }
     }
   };
-  socket.on('love', (x) => { d = x; paintPill(); if (!panel.hidden) paint(); });
+  let lastSig = '';
+  socket.on('love', (x) => { d = x; paintPill(); if (!panel.hidden) { const sg = JSON.stringify(x); if (sg === lastSig) return; lastSig = sg; const k = panel.scrollTop; paint(); panel.scrollTop = k; } });
   socket.on('me', () => { if (!d) socket.emit('loveOpen'); });
   btn.addEventListener('click', () => { panel.hidden = false; paint(); socket.emit('loveOpen'); });
   close.addEventListener('click', () => { panel.hidden = true; });

@@ -3,12 +3,16 @@
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 
 export function initVoice(socket) {
-  let cfg = { ice: [{ urls: 'stun:stun.l.google.com:19302' }] };
+  let cfg = { ice: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }] };
   let stream = null, on = false, talking = false, locked = false;
   let peers = [], call = { with: null, ring: null }, friends = [];
   const conns = new Map();            // userId -> { pc, audio, analyser, pending: [], vol, level }
   const silenced = new Set();         // userIds silenced on this phone for this session
-  let ctx = null;
+  let ctx = null, autoLock = false, mic = { an: null, level: 0 };
+  const audioHost = el('div'); audioHost.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;overflow:hidden'; document.body.append(audioHost);
+  // Phones only let a page play incoming audio after you touch the screen. Retry on any touch.
+  const wake = () => { try { if (ctx && ctx.state === 'suspended') ctx.resume(); } catch {} for (const c of conns.values()) if (c.audio && c.audio.paused) c.audio.play().catch(() => {}); };
+  document.addEventListener('pointerdown', wake, true);
 
   // ---------- screen bits ----------
   const btn = el('button'); btn.id = 'voiceBtn'; btn.setAttribute('aria-label', 'Push to talk'); btn.textContent = '🎙️';
@@ -46,6 +50,7 @@ export function initVoice(socket) {
     catch { alert('Microphone blocked. Allow the microphone for this site in your browser settings, then try again.'); return false; }
     for (const t of stream.getAudioTracks()) t.enabled = false;
     try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); if (ctx.state === 'suspended') ctx.resume(); } catch { ctx = null; }
+    try { if (ctx) { const src = ctx.createMediaStreamSource(stream); mic.an = ctx.createAnalyser(); mic.an.fftSize = 256; src.connect(mic.an); } } catch { mic.an = null; }
     on = true; socket.emit('voiceOn', true); paintBtn(); paint();
     return true;
   }
@@ -54,7 +59,7 @@ export function initVoice(socket) {
     socket.emit('voiceOn', false);
     for (const id of [...conns.keys()]) drop(id);
     if (stream) { for (const t of stream.getTracks()) t.stop(); stream = null; }
-    peers = []; paintBtn(); paint();
+    peers = []; mic.an = null; mic.level = 0; paintBtn(); paint();
   }
   const paintBtn = () => { btn.className = !on ? 'off' : talking ? 'talk' : 'live'; btn.textContent = !on ? '🎙️' : talking ? '🔴' : '🎤'; };
 
@@ -70,9 +75,10 @@ export function initVoice(socket) {
   btn.addEventListener('contextmenu', (e) => e.preventDefault());
 
   // ---------- connections ----------
-  function drop(id) {
+  function drop(id, retry = false) {
     const c = conns.get(id);
     if (!c) return;
+    if (retry) setTimeout(() => { if (on && !conns.has(id)) { const p = peers.find((x) => x.id === id); if (p) open(p); } }, 3000);
     try { c.pc.close(); } catch {}
     if (c.audio) { c.audio.srcObject = null; c.audio.remove(); }
     conns.delete(id);
@@ -85,11 +91,12 @@ export function initVoice(socket) {
     for (const t of stream.getAudioTracks()) pc.addTrack(t, stream);
     pc.onicecandidate = (e) => { if (e.candidate) socket.emit('voiceSignal', { to: peer.id, data: { type: 'candidate', candidate: e.candidate.toJSON() } }); };
     pc.ontrack = (e) => {
-      const a = new Audio(); a.autoplay = true; a.playsInline = true; a.srcObject = e.streams[0]; a.volume = silenced.has(peer.id) ? 0 : c.vol; c.audio = a;
+      const a = document.createElement('audio'); a.autoplay = true; a.playsInline = true; a.setAttribute('playsinline', ''); a.srcObject = e.streams[0]; a.volume = silenced.has(peer.id) ? 0 : c.vol; c.audio = a; audioHost.append(a);
       a.play().catch(() => {});
       if (ctx) { try { const src = ctx.createMediaStreamSource(e.streams[0]); const an = ctx.createAnalyser(); an.fftSize = 256; src.connect(an); c.analyser = an; } catch {} }
     };
-    pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed' || pc.connectionState === 'closed') { if (conns.get(peer.id) === c) { drop(peer.id); } } };
+    pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed' || pc.connectionState === 'closed') { if (conns.get(peer.id) === c) { drop(peer.id, pc.connectionState === 'failed'); if (!panel.hidden) paint(); } } else if (!panel.hidden) paint(); };
+    pc.oniceconnectionstatechange = () => { if (!panel.hidden) paint(); };
     // The player with the smaller id makes the offer, so two phones never both offer at once.
     if (myId !== null && myId < peer.id) {
       pc.createOffer().then((o) => pc.setLocalDescription(o)).then(() => socket.emit('voiceSignal', { to: peer.id, data: { type: 'offer', sdp: pc.localDescription.sdp } })).catch(() => drop(peer.id));
@@ -118,6 +125,14 @@ export function initVoice(socket) {
   const applyVolumes = () => { for (const [id, c] of conns) { const p = peers.find((x) => x.id === id); if (p) c.vol = p.vol; if (c.audio) c.audio.volume = silenced.has(id) ? 0 : c.vol; } };
 
   // ---------- panel ----------
+  const connText = (c) => {
+    if (!c) return 'not connected yet';
+    const s = c.pc.iceConnectionState;
+    if (s === 'connected' || s === 'completed') return c.level > 0.04 ? 'connected, you can hear them' : 'connected';
+    if (s === 'failed') return 'could not connect (your network blocks direct audio)';
+    if (s === 'disconnected') return 'connection dropped, retrying';
+    return 'connecting…';
+  };
   const nameOf = (id) => (peers.find((x) => x.id === id) || {}).name || '';
   function paint() {
     body.replaceChildren();
@@ -127,13 +142,20 @@ export function initVoice(socket) {
     const g = el('button', 'vcGo', on ? 'Turn voice off' : 'Turn voice on'); g.addEventListener('click', () => (on ? disable() : enable()));
     row.append(g);
     if (on) { const l = el('button', 'vcGo alt', locked ? 'Mic stays open ✓' : 'Keep mic open'); l.addEventListener('click', () => { locked = !locked; setTalk(false); paint(); }); row.append(l); }
-    top.append(row); body.append(top);
+    top.append(row);
+    if (on) {
+      const meter = el('div', 'vcSub', 'Your mic (hold 🎤 and say hello: the bar should move)');
+      const bar = el('div'); bar.id = 'vcMeter'; bar.style.cssText = 'height:8px;border-radius:4px;background:#3a3f4b;margin-top:4px;overflow:hidden';
+      const fill = el('div'); fill.id = 'vcMeterFill'; fill.style.cssText = 'height:100%;width:0;background:#3ddc84;transition:width .1s'; bar.append(fill);
+      top.append(meter, bar);
+    }
+    body.append(top);
     if (!on) return;
     body.append(el('div', 'vcTop', 'Who can hear you'));
     if (!peers.length) body.append(el('div', 'fine', 'Nobody close by with voice on.'));
     for (const p of peers) {
       const r = el('div', 'vcRow'), c = conns.get(p.id);
-      r.append(el('div', 'vcTop', `${c && c.level > 0.04 ? '🔊' : '🎧'} ${p.name}`), el('div', 'vcSub', p.call ? 'On a call' : `Volume ${Math.round(p.vol * 100)}%`));
+      r.append(el('div', 'vcTop', `${c && c.level > 0.04 ? '🔊' : '🎧'} ${p.name}`), el('div', 'vcSub', `${connText(c)}${p.call ? ' · on a call' : ` · volume ${Math.round(p.vol * 100)}%`}`));
       const b = el('div', 'vcBtns');
       const s = el('button', 'vcGo alt', silenced.has(p.id) ? 'Unsilence' : 'Silence'); s.addEventListener('click', () => { silenced.has(p.id) ? silenced.delete(p.id) : silenced.add(p.id); applyVolumes(); paint(); });
       const rp = el('button', 'vcGo alt', 'Report'); rp.addEventListener('click', () => { if (confirm(`Report ${p.name}?`)) socket.emit('report', { sid: p.sid }); });
@@ -171,7 +193,13 @@ export function initVoice(socket) {
     applyVolumes(); if (!panel.hidden) paint();
   });
   socket.on('voiceSignal', onSignal);
-  socket.on('call', (x) => { call = x; paintPill(); if (!panel.hidden) paint(); });
+  socket.on('call', (x) => {
+    call = x;
+    // On a call, nobody should have to hold a button: keep the mic open until the call ends.
+    if (call.with && on && !locked) { locked = true; autoLock = true; setTalk(false); }
+    else if (!call.with && autoLock) { locked = false; autoLock = false; setTalk(false); }
+    paintPill(); if (!panel.hidden) paint();
+  });
   socket.on('friends', (f) => { friends = (f && f.friends) || []; if (!panel.hidden) paint(); });
   socket.on('disconnect', () => { for (const id of [...conns.keys()]) drop(id); });
   socket.on('connect', () => { if (on) socket.emit('voiceOn', true); });
@@ -188,6 +216,12 @@ export function initVoice(socket) {
       let m = 0; for (const v of buf) m = Math.max(m, Math.abs(v - 128));
       c.level = m / 128;
       if (c.level > 0.04 && !silenced.has(id)) who.push(nameOf(id) || 'Someone');
+    }
+    if (mic.an) {
+      mic.an.getByteTimeDomainData(buf);
+      let m = 0; for (const v of buf) m = Math.max(m, Math.abs(v - 128));
+      mic.level = m / 128;
+      const f = document.getElementById('vcMeterFill'); if (f) f.style.width = Math.min(100, Math.round(mic.level * 300)) + '%';
     }
     if (who.length) { speak.hidden = false; speak.textContent = '🗣 ' + who.join(', '); } else speak.hidden = true;
   }, 250);

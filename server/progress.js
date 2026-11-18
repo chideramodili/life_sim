@@ -107,6 +107,7 @@ export const ACHIEVEMENTS = [
   { id: 'a_fare1', name: 'First Fare', text: 'Complete your first taxi fare.', goal: 1, val: (P) => P.st.fares || 0, cash: 3000, xp: 30 },
   { id: 'a_fare50', name: 'Taxi Pro', text: 'Complete 50 taxi fares.', goal: 50, val: (P) => P.st.fares || 0, cash: 80000, xp: 300 },
   { id: 'a_fare200', name: 'City Legend', text: 'Complete 200 taxi fares.', goal: 200, val: (P) => P.st.fares || 0, cash: 300000, xp: 800 },
+  { id: 'a_landlord', name: 'Landlord', text: 'Rent your business out 3 times.', goal: 3, val: (P) => P.st.leases || 0, cash: 40000, xp: 200 },
   { id: 'a_party5', name: 'Party Animal', text: 'Join or host 5 parties.', goal: 5, val: (P) => P.st.party || 0, cash: 30000, xp: 150 },
   { id: 'a_host3', name: 'Event Host', text: 'Host 3 parties.', goal: 3, val: (P) => P.st.host || 0, cash: 40000, xp: 200 },
   { id: 'a_upg1', name: 'Gearhead', text: 'Fit your first vehicle upgrade.', goal: 1, val: (P) => P.st.upg || 0, cash: 5000, xp: 40 },
@@ -131,7 +132,7 @@ export const ACHIEVEMENTS = [
 ];
 
 // ---------- State ----------
-const STATS = ['shifts', 'earned', 'spent', 'buys', 'sent', 'chat', 'knocks', 'acts', 'trips', 'saved', 'deliv', 'delM', 'fares', 'taxiM', 'rateSum', 'rateN', 'chests', 'rallies', 'mgmt', 'loves', 'dates', 'wed', 'party', 'host', 'upg', 'races', 'raceWins', 'podiums', 'raceWon'];
+const STATS = ['shifts', 'earned', 'spent', 'buys', 'sent', 'chat', 'knocks', 'acts', 'trips', 'saved', 'deliv', 'delM', 'fares', 'taxiM', 'rateSum', 'rateN', 'chests', 'rallies', 'mgmt', 'loves', 'dates', 'wed', 'party', 'host', 'upg', 'races', 'raceWins', 'podiums', 'raceWon', 'leases', 'rents'];
 export const defaultProg = () => ({ xp: 0, tok: 0, wins: 0, lv: 1, st: Object.fromEntries(STATS.map((k) => [k, 0])), pl: [], bd: [], ach: {}, dk: '', d: null, wk: '', w: null });
 const num = (v, lo, hi, d) => (Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d);
 function parseSet(raw, scope) {
@@ -256,6 +257,8 @@ export function record(prog, ev, n, now, seedName, key) {
     else if (ev === 'wed') { st.wed += n; prog.xp += 200 * n; }
     else if (ev === 'party') { st.party += n; prog.xp += 15 * n; }
     else if (ev === 'host') { st.host += n; prog.xp += 25 * n; }
+    else if (ev === 'lease') { st.leases += n; prog.xp += 40 * n; }
+    else if (ev === 'rent') { st.rents += n; prog.xp += 30 * n; }
     else if (ev === 'upgrade') { st.upg += n; prog.xp += 20 * n; }
     else if (ev === 'race') { st.races += n; prog.xp += 30 * n; }
     else if (ev === 'racexp') prog.xp += n;
