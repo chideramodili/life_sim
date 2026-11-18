@@ -50,6 +50,9 @@ import {
 } from './bank.js';
 import { DATE_COST, DATE_LOVE, DATE_COOLDOWN, MARRY_LOVE, RING, WEDDING_GIFT, DIVORCE_FEE, ASK_SECONDS, DATE_FX, coupleView, canMarry, stageName } from './love.js';
 import { PARTY_COST, PARTY_SECONDS, PARTY_RADIUS, PARTY_COOLDOWN_MS, GUEST_PAY, GUEST_CAP, TICK_FX, NAMES as PARTY_NAMES } from './party.js';
+import { FORMATS, CLASSES, SPLITS, START_RADIUS, COUNTDOWN_SECONDS, CP_REACH as RACE_REACH, FINISH_WINDOW_SECONDS, LOBBY_SECONDS, MAX_SPEED, checkConfig, makeRoute, totalCheckpoints, targetOf, raceSeconds, payouts, classOk, stakeXp, MIN_ENTRY_FLOOR, MIN_ENTRY_CAP, MAX_PLAYERS, MAX_LAPS } from './race.js';
+import { UPGRADES, UP_IDS, UP_MAX, upgradeCost, upOf, upTotal, GARAGE_COST, GARAGE_SLOTS, LOT_SLOTS, LOT_FEE, VALET_FEE, ZONE_RADIUS, parseGarage, lotsFor, zoneAt, parkedIn, isParked } from './garage.js';
+import { pickPeers, okSignal, CALL_RING_SECONDS } from './voice.js';
 import { buildBoards } from './boards.js';
 import { SPECIALS, SPECIAL_IDS, SPECIAL_SECONDS, CHEST_COUNT, CHEST_REACH, CHECKPOINTS, CP_REACH, CHEST_PAY, RALLY_PAY, RALLY_PRIZES, spreadPoints, SHOP, SHOP_ITEM } from './special.js';
 import { makeRequest, baseFare, stars as taxiStars, tipFor, taxiLevel, taxiNext, TAXI_REACH, REQUEST_SECONDS } from './taxi.js';
@@ -356,6 +359,13 @@ db.exec(`
     PRIMARY KEY (a, b)
   );
   CREATE INDEX IF NOT EXISTS couples_b ON couples (b);
+  -- Race stakes held in escrow. A row exists only while a race holds the money; on a restart any leftover rows are refunded.
+  CREATE TABLE IF NOT EXISTS race_escrow (
+    race    TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    amount  INTEGER NOT NULL,
+    PRIMARY KEY (race, user_id)
+  );
   CREATE TABLE IF NOT EXISTS friendships (
     a      INTEGER NOT NULL,
     b      INTEGER NOT NULL,
@@ -395,6 +405,7 @@ const addColumn = (name, ddl) => {
   if (!existingColumns.includes(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${ddl}`);
 };
 for (const n of ['energy', 'fun', 'social', 'clean', 'toilet']) addColumn(n, 'INTEGER NOT NULL DEFAULT 70');
+addColumn('garage', "TEXT NOT NULL DEFAULT ''");   // private garage + parked vehicles (JSON)
 addColumn('look2', 'TEXT');             // new-generation character (JSON), null until the player has chosen one
 addColumn('recovery_hash', 'TEXT');
 addColumn('email', 'TEXT');             // verified email (password reset by email)
@@ -457,7 +468,7 @@ const q = {
   setLook: db.prepare('UPDATE users SET body = ?, eyes = ?, skin = ?, hair = ?, style = ?, face = ? WHERE id = ?'),
   insertUser: db.prepare('INSERT INTO users (username, pass_hash, recovery_hash, cash, food, room, created_at, last_seen, phone, start_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   saveExtra: db.prepare('UPDATE users SET laptop = ?, job3_id = ?, last_work3 = ?, job_city = ?, staff_json = ? WHERE id = ?'),
-  saveUser: db.prepare('UPDATE users SET cash = ?, food = ?, energy = ?, fun = ?, social = ?, clean = ?, toilet = ?, room = ?, story = ?, last_work = ?, bills = ?, skills = ?, job_id = ?, job2_id = ?, last_work2 = ?, handsets = ?, city = ?, home_city = ?, stress = ?, sick = ?, burnout = ?, vehicles = ?, net = ?, rep = ?, bank = ?, home = ?, wardrobe = ?, fines = ?, jail_until = ?, last_seen = ? WHERE id = ?'),
+  saveUser: db.prepare('UPDATE users SET cash = ?, food = ?, energy = ?, fun = ?, social = ?, clean = ?, toilet = ?, room = ?, story = ?, last_work = ?, bills = ?, skills = ?, job_id = ?, job2_id = ?, last_work2 = ?, handsets = ?, city = ?, home_city = ?, stress = ?, sick = ?, burnout = ?, vehicles = ?, net = ?, rep = ?, bank = ?, home = ?, wardrobe = ?, fines = ?, jail_until = ?, last_seen = ?, garage = ? WHERE id = ?'),
   addLedger: db.prepare('INSERT INTO ledger (user_id, kind, bal, cash, bal_after, cash_after, note, game_min, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   pruneLedger: db.prepare('DELETE FROM ledger WHERE user_id = ? AND id NOT IN (SELECT id FROM ledger WHERE user_id = ? ORDER BY id DESC LIMIT 300)'),
   ledgerOf: db.prepare('SELECT id, kind, bal, cash, bal_after, cash_after, note, game_min, at FROM ledger WHERE user_id = ? ORDER BY id DESC LIMIT ?'),
@@ -483,6 +494,11 @@ const q = {
   setPhone: db.prepare('UPDATE users SET phone = ? WHERE id = ?'),
   friendRows: db.prepare('SELECT f.b AS id, f.status AS status, u.username AS name, u.plot AS plot, u.home_city AS homeCity FROM friendships f JOIN users u ON u.id = f.b WHERE f.a = ? ORDER BY u.username'),
   boardRows: db.prepare('SELECT id, username, cash, bank FROM users ORDER BY last_seen DESC LIMIT 5000'),
+  escrowSet: db.prepare('INSERT OR REPLACE INTO race_escrow (race, user_id, amount) VALUES (?, ?, ?)'),
+  escrowDel: db.prepare('DELETE FROM race_escrow WHERE race = ?'),
+  escrowDelOne: db.prepare('DELETE FROM race_escrow WHERE race = ? AND user_id = ?'),
+  escrowAll: db.prepare('SELECT * FROM race_escrow'),
+  addCash: db.prepare('UPDATE users SET cash = cash + ? WHERE id = ?'),
   coupleOf: db.prepare('SELECT * FROM couples WHERE a = ? OR b = ?'),
   coupleSet: db.prepare('INSERT OR REPLACE INTO couples (a, b, status, love, at, last_date) VALUES (?, ?, ?, ?, ?, ?)'),
   coupleDel: db.prepare('DELETE FROM couples WHERE a = ? AND b = ?'),
@@ -1192,7 +1208,7 @@ function jobsInfo(p) {
   };
 }
 // The vehicle of this kind the player drives: the last one of that kind in their list (using one moves it to the end).
-const activeVehicle = (p, kind) => { for (let k = p.vehicles.length - 1; k >= 0; k--) if (VEHICLES[p.vehicles[k]].kind === kind) return p.vehicles[k]; return null; };
+const activeVehicle = (p, kind) => { for (let k = p.vehicles.length - 1; k >= 0; k--) if (VEHICLES[p.vehicles[k]].kind === kind && !isParked(p.garage, p.vehicles[k])) return p.vehicles[k]; return null; };
 function vehiclesInfo(p) {
   return {
     here: p.room === 'garage' && venueOpen('garage'),
@@ -1200,7 +1216,7 @@ function vehiclesInfo(p) {
   };
 }
 const sendVehicles = (p) => p.socket.emit('vehicles', vehiclesInfo(p));
-const hasCar = (p) => p.vehicles.some((id) => VEHICLES[id].kind === 'car');
+const hasCar = (p) => Boolean(activeVehicle(p, 'car'));
 const sendStaff = (p) => p.socket.emit('staff', staffInfo(p.staff, p.cash, hasCar(p)));
 
 // ----- Bank: every movement of money goes through bankCommit, so there is always a record -----
@@ -1231,7 +1247,7 @@ const delivView = (p) => {
   const st = p.bank.prog.st, lvl = courierLevel(st.deliv);
   const now = Date.now(), j = p.deliv;
   return {
-    here: p.room === 'depot' && venueOpen('depot'), level: lvl, deliveries: st.deliv, next: NEXT_AT(st.deliv), earned: Math.floor(st.delM), hasRide: p.vehicles.length > 0,
+    here: p.room === 'depot' && venueOpen('depot'), level: lvl, deliveries: st.deliv, next: NEXT_AT(st.deliv), earned: Math.floor(st.delM), hasRide: Boolean(activeVehicle(p, 'car') || activeVehicle(p, 'bike')),
     offers: (p.dOffers || []).map((o, i) => ({ i, kind: o.kind, title: DELIV_KIND[o.kind].title, icon: DELIV_KIND[o.kind].icon, text: DELIV_KIND[o.kind].text, pick: pointName(p, o.pick), drop: pointName(p, o.drop), route: o.route, limit: o.limit, pay: o.pay })),
     job: j ? { kind: j.kind, title: DELIV_KIND[j.kind].title, icon: DELIV_KIND[j.kind].icon, stage: j.stage, pay: j.pay, secondsLeft: Math.max(0, Math.ceil((j.endsAt - now) / 1000)), pick: { ...j.pick, name: pointName(p, j.pick) }, drop: { ...j.drop, name: pointName(p, j.drop) } } : null,
   };
@@ -1281,7 +1297,7 @@ const taxiView = (p) => {
   const rq = t.req, j = t.job;
   return {
     on: t.on, level: lvl, fares: st.fares, next: taxiNext(st.fares), earned: Math.floor(st.taxiM), rating: st.rateN ? Math.round((st.rateSum / st.rateN) * 10) / 10 : 0,
-    hasCar: p.vehicles.some((id) => VEHICLES[id].kind === 'car'),
+    hasCar: Boolean(activeVehicle(p, 'car')),
     request: rq ? { name: rq.name, pick: pointName(p, rq.pick), drop: pointName(p, rq.drop), ride: rq.ride, fare: baseFare(rq, lvl), secondsLeft: Math.max(0, Math.ceil((rq.expires - now) / 1000)) } : null,
     job: j ? { name: j.name, stage: j.stage, fare: j.fare, secondsLeft: Math.max(0, Math.ceil((j.endsAt - now) / 1000)), pick: { ...j.pick, name: pointName(p, j.pick) }, drop: { ...j.drop, name: pointName(p, j.drop) } } : null,
   };
@@ -1486,6 +1502,168 @@ function boardsFor(p) {
   const live = new Map([...players.values()].map((o) => [o.userId, { id: o.userId, name: o.name, cash: o.cash, bank: o.bank }]));
   return buildBoards(boardUsers.map((u) => live.get(u.id) || u), p.userId);
 }
+
+// ---------- Voice chat (rules in voice.js): proximity voice and friend calls. The audio goes phone to phone; the server picks who may connect. ----------
+const VOICE_ICE = [{ urls: 'stun:stun.l.google.com:19302' }, ...(process.env.VOICE_TURN_URL ? [{ urls: process.env.VOICE_TURN_URL.split(','), username: process.env.VOICE_TURN_USER || '', credential: process.env.VOICE_TURN_PASS || '' }] : [])];
+const voiceMuted = (a, b) => a.muted.has(b.userId) || b.muted.has(a.userId);
+const sendCall = (p) => {
+  const c = p.call ? liveUser(p.call) : null;
+  p.socket.emit('call', { with: c ? c.name : null, ring: p.callIn && Date.now() - p.callIn.at < CALL_RING_SECONDS * 1000 ? p.callIn.name : null });
+};
+function voiceTick() {
+  const on = [...players.values()].filter((o) => o.voiceOn);
+  for (const p of on) {
+    if (p.call && (!liveUser(p.call) || !liveUser(p.call).voiceOn)) { p.call = null; sendCall(p); }
+    if (p.callIn && Date.now() - p.callIn.at >= CALL_RING_SECONDS * 1000) { p.callIn = null; sendCall(p); }
+    const others = on.filter((o) => o !== p).map((o) => ({ userId: o.userId, name: o.name, sid: o.socket.id, x: o.x, z: o.z, city: o.city, room: o.room, space: spaceOf(o) }));
+    const peers = pickPeers(p, spaceOf(p), others, (a, b) => voiceMuted(a, byUser.get(b.userId)), p.call);
+    p.voiceSet = new Set(peers.map((x) => x.id));
+    const sig = JSON.stringify(peers);
+    if (sig !== p.voiceSig) { p.voiceSig = sig; p.socket.emit('voicePeers', { peers }); }
+  }
+}
+setInterval(voiceTick, 1000);
+
+// ---------- Garage and parking (rules in garage.js): private home garage + public car parks ----------
+const LOT_CACHE = {};
+const lotsOf = (cityId) => LOT_CACHE[cityId] || (LOT_CACHE[cityId] = lotsFor(CITY_CTX[cityId].layout, (id) => placeName(cityId, id, ROOMS[id] ? ROOMS[id].name : id)));
+const homeDoorOf = (p) => (p.city === p.homeCity ? plotOf(p).door : null);
+const zoneOfPlayer = (p) => (p.room === 'street' && !p.trip ? zoneAt({ x: p.x, z: p.z }, homeDoorOf(p), p.garage.g, lotsOf(p.city)) : null);
+const whereName = (p, s) => (s.at === 'home' ? 'Home garage' : ((lotsOf(s.city).find((l) => l.id === s.at)) || { name: 'Car park' }).name);
+function garageView(p) {
+  const z = zoneOfPlayer(p), gar = p.garage;
+  const lots = lotsOf(p.city).map((l) => ({ id: l.id, name: l.name, x: l.x, z: l.z, dist: p.room === 'street' ? Math.round(Math.hypot(p.x - l.x, p.z - l.z)) : -1 }));
+  const hd = homeDoorOf(p);
+  return {
+    hasGarage: gar.g, garageCost: GARAGE_COST, slots: GARAGE_SLOTS, lotSlots: LOT_SLOTS, lotFee: LOT_FEE, valetFee: VALET_FEE,
+    inHomeCity: p.city === p.homeCity, home: hd ? { x: hd.x, z: hd.z, dist: p.room === 'street' ? Math.round(Math.hypot(p.x - hd.x, p.z - hd.z)) : -1 } : null,
+    zone: z ? { at: z.at, name: z.name } : null, lots,
+    usedHome: parkedIn(gar, 'home', p.homeCity).length, usedLots: parkedIn(gar, 'lots', p.city).length,
+    vehicles: p.vehicles.map((id) => {
+      const s = gar.v[id], v = VEHICLES[id];
+      return { id, label: v.label, kind: v.kind, tier: v.tier, parked: Boolean(s), where: s ? whereName(p, s) : null, city: s ? s.city : null, here: s ? s.city === p.city : true, active: !s && activeVehicle(p, v.kind) === id, here_zone: s && z ? s.at === z.at : false, ups: UP_IDS.map((c) => { const lv = upOf(gar, id)[c]; return { cat: c, label: UPGRADES[c].label, text: UPGRADES[c].text, level: lv, max: UP_MAX, cost: lv < UP_MAX ? upgradeCost(v.cost, c, lv + 1) : 0 }; }), kmh: Math.round(VEH[v.kind].max * v.speed * (1 + 0.04 * upOf(gar, id).engine) * 3.6) };
+    }),
+  };
+}
+const sendGarage = (p) => p.socket.emit('garage', garageView(p));
+const sendVeh = (p) => { sendGarage(p); sendVehicles(p); };
+
+// ---------- Racing (rules in race.js): player-created races, stakes in escrow, server-checked checkpoints ----------
+const RACES = new Map();     // id -> race
+let raceSeq = 0;
+const raceOf = (p) => { for (const r of RACES.values()) if (r.entries.has(p.userId)) return r; return null; };
+const raceUpTotal = (p, kind) => { const v = activeVehicle(p, kind); return v ? upTotal(upOf(p.garage, v)) : null; };
+// Can this player enter a race with this vehicle rule right now?
+function raceEligible(p, cls) {
+  const kinds = ['car', 'bike'].filter((k) => activeVehicle(p, k));
+  if (!kinds.length) return { ok: false, why: 'You need a vehicle that is not parked. See the Garage app.' };
+  const okKind = kinds.find((k) => classOk(cls, k, raceUpTotal(p, k)));
+  return okKind ? { ok: true, kind: okKind } : { ok: false, why: `Your vehicle does not fit the rule: ${CLASSES[cls]}.` };
+}
+const racePool = (r) => [...r.entries.values()].reduce((n, e) => n + e.stake, 0);
+const raceNote = (r, msg) => { for (const id of r.entries.keys()) { const o = liveUser(id); if (o) notice(o, msg); } };
+function raceDist(r, o) { return o && o.room === 'street' && o.city === r.city ? Math.round(Math.hypot(o.x - r.route.start.x, o.z - r.route.start.z)) : -1; }
+function raceView(p) {
+  const now = Date.now(), mine = raceOf(p);
+  const sum = (r) => ({ id: r.id, name: r.name, format: FORMATS[r.format].label, laps: r.laps, count: r.entries.size, max: r.max, minEntry: r.minEntry, split: SPLITS[r.split].label, cls: CLASSES[r.cls], pool: racePool(r), vis: r.vis, creator: r.creatorName, km: Math.round(raceLengthKm(r) * 10) / 10 });
+  const out = {
+    cfg: { minFloor: MIN_ENTRY_FLOOR, minCap: MIN_ENTRY_CAP, maxPlayers: MAX_PLAYERS, maxLaps: MAX_LAPS, formats: Object.entries(FORMATS).map(([id, f]) => ({ id, label: f.label, text: f.text })), classes: Object.entries(CLASSES).map(([id, l]) => ({ id, label: l })), splits: Object.entries(SPLITS).map(([id, x]) => ({ id, label: x.label })) },
+    list: [...RACES.values()].filter((r) => r.city === p.city && r.state === 'open' && r.vis === 'public' && r !== mine).map(sum),
+    mine: null, last: p.lastRace || null, cash: p.cash,
+  };
+  if (mine) {
+    const me = mine.entries.get(p.userId), t = mine.state === 'running' || mine.state === 'countdown' ? null : null;
+    const idx = me.idx;
+    const target = mine.state === 'running' && !me.done ? targetOf(mine, idx) : (mine.state === 'open' || mine.state === 'countdown') ? mine.route.start : null;
+    out.mine = {
+      ...sum(mine), state: mine.state, isCreator: mine.creatorId === p.userId, code: mine.creatorId === p.userId && mine.vis === 'private' ? mine.code : null, myStake: me.stake,
+      goIn: mine.state === 'countdown' ? Math.max(0, Math.ceil((mine.goAt - now) / 1000)) : 0,
+      elapsedMs: mine.state === 'running' ? Math.max(0, now - mine.goAt) : 0,
+      progress: { done: idx, total: totalCheckpoints(mine) }, finished: me.done, myMs: me.ms || 0, target,
+      entries: [...mine.entries.entries()].map(([id, e]) => ({ name: e.name, stake: e.stake, dist: raceDist(mine, liveUser(id)), done: e.done, ms: e.ms || 0, idx: e.idx })),
+    };
+  }
+  return out;
+}
+const raceLengthKm = (r) => { let d = 0, prev = r.route.start; for (let l = 0; l < r.laps; l++) for (const c of r.route.cps) { d += Math.hypot(c.x - prev.x, c.z - prev.z); prev = c; } return d / 1000; };
+const sendRace = (p) => p.socket.emit('race', raceView(p));
+const sendRaceCity = (city) => { for (const o of players.values()) if (o.city === city) sendRace(o); };
+const raceRefundOne = (r, uid, why) => {
+  const e = r.entries.get(uid);
+  if (!e) return;
+  r.entries.delete(uid); q.escrowDelOne.run(r.id, uid);
+  const o = liveUser(uid);
+  if (o) { o.cash += e.stake; if (why) notice(o, why); save(o); sendRace(o); } else q.addCash.run(e.stake, uid);
+};
+function raceCancel(r, why) {
+  for (const uid of [...r.entries.keys()]) raceRefundOne(r, uid, `${why} Your ₦${r.entries.get(uid).stake.toLocaleString('en-NG')} was refunded.`);
+  q.escrowDel.run(r.id); RACES.delete(r.id); sendRaceCity(r.city);
+}
+function raceFinish(r) {
+  if (r.state === 'done') return;
+  r.state = 'done';
+  const places = r.results.slice();                                   // user ids in finish order
+  if (!places.length) { for (const uid of [...r.entries.keys()]) raceRefundOne(r, uid, `Nobody finished ${r.name}, so every stake was refunded.`); q.escrowDel.run(r.id); RACES.delete(r.id); sendRaceCity(r.city); return; }
+  const stakes = Object.fromEntries([...r.entries].map(([id, e]) => [id, e.stake]));
+  const pay = payouts(stakes, places, r.split);
+  const rows = places.map((id, i) => ({ place: i + 1, name: r.entries.get(id).name, ms: r.entries.get(id).ms, won: pay[id] || 0 }));
+  const dnf = [...r.entries].filter(([id]) => !places.includes(id)).map(([, e]) => e.name);
+  const pool = racePool(r);
+  for (const [uid, e] of r.entries) {
+    const place = places.indexOf(uid) + 1, amt = pay[uid] || 0, o = liveUser(uid);
+    if (amt > 0) { if (o) { o.cash += amt; addFlow(o.bank, amt); } else q.addCash.run(amt, uid); }
+    if (o) {
+      progGain(o, 'race'); progGain(o, 'racexp', stakeXp(e.stake, r.minEntry));
+      if (place >= 1 && place <= 3 && places.length >= 2) progGain(o, 'podium');
+      if (place === 1 && r.entries.size >= 2) progGain(o, 'racewin');
+      if (amt > 0) { progGain(o, 'racewon', amt); progGain(o, 'earn', amt); }
+      o.lastRace = { name: r.name, pool, rows, dnf, place, won: amt };
+      notice(o, place ? `🏁 You finished ${place}${place === 1 ? 'st' : place === 2 ? 'nd' : place === 3 ? 'rd' : 'th'} in ${r.name}${amt ? ` and won ₦${amt.toLocaleString('en-NG')}` : ''}.` : `🏁 ${r.name} is over. You did not finish, so your stake was lost.`);
+      save(o);
+    }
+  }
+  q.escrowDel.run(r.id);
+  const city = r.city;
+  for (const uid of r.entries.keys()) { const o = liveUser(uid); if (o) o.raceBeacon = null; }
+  RACES.delete(r.id);
+  for (const uid of r.entries.keys()) { const o = liveUser(uid); if (o) { r.entries.delete(uid); sendRace(o); } }
+  sendRaceCity(city);
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const r of [...RACES.values()]) {
+    if (r.state === 'open') {
+      if (now - r.openedAt > LOBBY_SECONDS * 1000) { raceCancel(r, 'Nobody started the race in time.'); continue; }
+      for (const uid of [...r.entries.keys()]) if (!liveUser(uid)) { if (uid === r.creatorId) { raceCancel(r, 'The creator left.'); break; } raceRefundOne(r, uid); }
+      continue;
+    }
+    if (r.state === 'countdown') {
+      if (now >= r.goAt) { r.state = 'running'; r.endsAt = r.goAt + raceSeconds(r) * 1000; raceNote(r, '🏁 GO!'); sendRaceCity(r.city); }
+      continue;
+    }
+    if (r.state !== 'running') continue;
+    for (const [uid, e] of r.entries) {
+      if (e.done) continue;
+      const o = liveUser(uid);
+      if (!o || !o.drive || o.room !== 'street' || o.city !== r.city) continue;
+      const tg = targetOf(r, e.idx);
+      if (Math.hypot(o.x - tg.x, o.z - tg.z) > RACE_REACH) continue;
+      const prev = e.idx === 0 ? r.route.start : targetOf(r, e.idx - 1);
+      const need = (Math.hypot(tg.x - prev.x, tg.z - prev.z) / MAX_SPEED) * 1000;        // faster than this is not possible
+      if (now - e.lastAt < need) continue;
+      e.idx++; e.lastAt = now;
+      if (e.idx >= totalCheckpoints(r)) {
+        e.done = true; e.ms = now - r.goAt; r.results.push(uid);
+        if (!r.firstAt) r.firstAt = now;
+        notice(o, `🏁 You finished in ${(e.ms / 1000).toFixed(1)} s! Waiting for the others…`);
+      } else notice(o, `Checkpoint ${e.idx} / ${totalCheckpoints(r)}`);
+      sendRace(o);
+    }
+    const allDone = [...r.entries.values()].every((e) => e.done);
+    if (allDone || now > r.endsAt || (r.firstAt && now - r.firstAt > FINISH_WINDOW_SECONDS * 1000)) raceFinish(r);
+  }
+}, 250);
+setInterval(() => { for (const p of players.values()) if (raceOf(p)) sendRace(p); }, 2000);
 
 function sendProg(p) {
   progApply(p, progRecord(p.bank.prog, null, 0, Date.now(), p.name));   // pays unclaimed rewards after a reset
@@ -1762,7 +1940,7 @@ function dropLive(userId) {
 function save(p) {
   let room = p.trip ? p.trip.to : p.room; // a traveller is saved at their destination
   if (room === 'friendhome') room = 'street'; // a visitor wakes up outside next time
-  q.saveUser.run(p.cash, round1(p.food), round1(p.energy), round1(p.fun), round1(p.social), round1(p.clean), round1(p.toilet), room, JSON.stringify(p.story), p.lastWork, JSON.stringify(p.bills), JSON.stringify(p.skills), p.jobId, p.job2Id, p.lastWork2 || 0, serializePhones(p.handsets), p.city, p.homeCity, round1(p.stress), p.sick ? 1 : 0, p.burnout ? 1 : 0, JSON.stringify(p.vehicles), JSON.stringify(p.net), round1(p.rep), JSON.stringify(p.bank), JSON.stringify(p.home), JSON.stringify(p.wardrobe), JSON.stringify(p.fines), p.jailUntil || 0, Date.now(), p.userId);
+  q.saveUser.run(p.cash, round1(p.food), round1(p.energy), round1(p.fun), round1(p.social), round1(p.clean), round1(p.toilet), room, JSON.stringify(p.story), p.lastWork, JSON.stringify(p.bills), JSON.stringify(p.skills), p.jobId, p.job2Id, p.lastWork2 || 0, serializePhones(p.handsets), p.city, p.homeCity, round1(p.stress), p.sick ? 1 : 0, p.burnout ? 1 : 0, JSON.stringify(p.vehicles), JSON.stringify(p.net), round1(p.rep), JSON.stringify(p.bank), JSON.stringify(p.home), JSON.stringify(p.wardrobe), JSON.stringify(p.fines), p.jailUntil || 0, Date.now(), JSON.stringify(p.garage), p.userId);
   q.saveExtra.run(p.laptop, p.job3Id, p.lastWork3 || 0, JSON.stringify(p.jobCity || {}), JSON.stringify(p.staff || {}), p.userId);
 }
 function saveAll() {
@@ -2030,6 +2208,9 @@ function arrestPlayer(p) {
 }
 // ----- Land and businesses -----
 // LOTS[city] is a Map of lot id -> { owner, ownerName, biz } for lots somebody owns. Empty lots are not in it.
+// A restart wipes live races, so give back every stake still held in escrow.
+for (const r of q.escrowAll.all()) { q.addCash.run(r.amount, r.user_id); }
+db.exec('DELETE FROM race_escrow');
 const LOTS = {};
 const parseMgmt = (t) => { try { const m = JSON.parse(t || '{}'); return { rep: Number.isFinite(m.rep) ? Math.max(0, Math.min(100, m.rep)) : 50, promoUntil: Number(m.promoUntil) || 0, cd: m.cd && typeof m.cd === 'object' ? m.cd : {} }; } catch { return { rep: 50, promoUntil: 0, cd: {} }; } };
 for (const id of CITY_IDS) LOTS[id] = new Map();
@@ -2169,6 +2350,7 @@ function takeHighway(p, side, now) {
 function beginDrive(p, kind, ry) {
   const vid = activeVehicle(p, kind);
   p.drive = newDrive(kind, p.x, p.z, ry, vid ? VEHICLES[vid].speed : 1);
+  p.drive.up = vid ? upOf(p.garage, vid) : {};
   p.driveIn = { steer: 0, thr: 0 };
   p.tx = p.x; p.tz = p.z;
   p.riding = kind; p.ry = ry;
@@ -2405,6 +2587,7 @@ io.on('connection', (socket) => {
     bankTimes: [],
     crCd: {},
     home: parseHome(saved.home),
+    garage: parseGarage(saved.garage, new Set(Object.keys(VEHICLES))),
     homeTimes: [],
     wardrobe: parseWardrobe(saved.wardrobe),
     faceShape: (() => { try { const a = JSON.parse(saved.face); return Array.isArray(a) && a.length === FACE_N && a.every((n) => Number.isInteger(n) && n >= -3 && n <= 3) ? a : new Array(FACE_N).fill(0); } catch { return new Array(FACE_N).fill(0); } })(),
@@ -2924,6 +3107,7 @@ io.on('connection', (socket) => {
   socket.on('useVehicle', (id) => {
     if (typeof id !== 'string' || !Object.hasOwn(VEHICLES, id) || !p.vehicles.includes(id)) return;
     if (p.drive) return notice(p, 'Park first.');
+    if (isParked(p.garage, id)) return notice(p, 'That one is parked. Take it out in the Garage app first.');
     p.vehicles = p.vehicles.filter((x) => x !== id).concat(id);
     notice(p, `You will drive the ${VEHICLES[id].label}.`);
     sendVehicles(p);
@@ -3124,7 +3308,7 @@ io.on('connection', (socket) => {
     if (p.room === 'depot' && !p.deliv && (!p.dOffers || Date.now() - p.dOffersAt > 60000)) {
       const ctx = ctxOf(p), o = ctx.layout.doors.depot;
       const lvl = courierLevel(p.bank.prog.st.deliv);
-      p.dOffers = o ? makeOffers(ctx.layout, o, lvl, Math.random, p.vehicles.some((id) => VEHICLES[id].kind === 'car')) : [];
+      p.dOffers = o ? makeOffers(ctx.layout, o, lvl, Math.random, Boolean(activeVehicle(p, 'car'))) : [];
       p.dOffersAt = Date.now();
     }
     sendDeliv(p);
@@ -3135,9 +3319,9 @@ io.on('connection', (socket) => {
     if (!venueOpen('depot')) return notice(p, closedText('depot'));
     if (p.deliv) return notice(p, 'You already have a delivery.');
     if (p.taxi && p.taxi.job) return notice(p, 'Finish your taxi ride first.');
-    if (!p.vehicles.length) return notice(p, 'You need a bicycle or a car to deliver. Kanis Motors sells them.');
+    if (!(activeVehicle(p, 'car') || activeVehicle(p, 'bike'))) return notice(p, 'You need a bicycle or a car to deliver (one that is not parked). Kanis Motors sells them.');
     const o = p.dOffers[i];
-    if (DELIV_KIND[o.kind].car && !p.vehicles.some((id) => VEHICLES[id].kind === 'car')) return notice(p, 'That load needs a car.');
+    if (DELIV_KIND[o.kind].car && !Boolean(activeVehicle(p, 'car'))) return notice(p, 'That load needs a car.');
     p.dOffers = null;
     p.deliv = { ...o, stage: 'pickup', city: p.city, endsAt: Date.now() + (o.limit + 15) * 1000 };   // +15 s to walk out and get in your vehicle
     notice(p, `Job taken: pick up at ${pointName(p, o.pick)}. Go outside and drive.`);
@@ -3149,7 +3333,7 @@ io.on('connection', (socket) => {
     if (!allow(p.socialTimes, 12, 10000)) return;
     const t = taxiState(p);
     if (on) {
-      if (!p.vehicles.some((id) => VEHICLES[id].kind === 'car')) return notice(p, 'You need your own car to drive a taxi. Kanis Motors sells them.');
+      if (!Boolean(activeVehicle(p, 'car'))) return notice(p, 'You need your own car to drive a taxi. Kanis Motors sells them.');
       if (jailLeft(p)) return;
       t.on = true; t.city = p.city; t.nextAt = Date.now() + 3000;
       notice(p, 'You are on duty. Drive around and requests will come in.');
@@ -3174,7 +3358,7 @@ io.on('connection', (socket) => {
     if (!allow(p.socialTimes, 12, 10000)) return;
     const sp = world.special;
     if (!sp || sp.id !== 'rally') return notice(p, 'There is no rally right now.');
-    if (!p.vehicles.some((id) => VEHICLES[id].kind === 'car')) return notice(p, 'You need your own car for the rally.');
+    if (!Boolean(activeVehicle(p, 'car'))) return notice(p, 'You need your own car for the rally.');
     if (p.rally && p.rally.city === p.city && !p.rally.done) return;
     if (p.rally && p.rally.done) return notice(p, 'You already finished this rally.');
     p.rally = { city: p.city, idx: 0, startAt: Date.now(), done: false, ms: 0 };
@@ -3291,6 +3475,179 @@ io.on('connection', (socket) => {
   });
   socket.on('partyEnd', () => { const x = PARTIES.get(p.userId); if (x) { x.endsAt = 0; } });
   socket.on('boardsOpen', () => { if (allow(p.socialTimes, 6, 10000)) p.socket.emit('boards', boardsFor(p)); });
+  socket.on('voiceOn', (on) => {
+    if (!allow(p.socialTimes, 12, 10000)) return;
+    p.voiceOn = on === true; p.voiceSig = ''; p.voiceSet = new Set();
+    if (p.voiceOn) socket.emit('voiceCfg', { ice: VOICE_ICE, me: p.userId });
+    else { if (p.call) { const c = liveUser(p.call); p.call = null; if (c) { c.call = null; sendCall(c); } } socket.emit('voicePeers', { peers: [] }); sendCall(p); }
+  });
+  socket.on('voiceSignal', (req) => {
+    if (!req || !Number.isInteger(req.to) || !okSignal(req.data) || !p.voiceOn || !(p.voiceSet && p.voiceSet.has(req.to))) return;
+    if (!allow(p.voiceSigTimes || (p.voiceSigTimes = []), 120, 5000)) return;
+    const o = liveUser(req.to);
+    if (!o || !o.voiceOn || voiceMuted(p, o)) return;
+    o.socket.emit('voiceSignal', { from: p.userId, data: req.data });
+  });
+  socket.on('callStart', (name) => {
+    if (typeof name !== 'string' || !allow(p.socialTimes, 12, 10000)) return;
+    const t = [...players.values()].find((o) => o.name === name);
+    if (!t || t === p) return notice(p, 'That player must be online.');
+    if (!isFriend(p.userId, t.userId)) return notice(p, 'You can only call friends.');
+    if (voiceMuted(p, t)) return notice(p, 'You cannot call that player.');
+    if (p.call) return notice(p, 'You are already on a call.');
+    if (t.call) return notice(p, `${t.name} is on another call.`);
+    t.callIn = { from: p.userId, name: p.name, at: Date.now() };
+    notice(p, `Calling ${t.name}…`); notice(t, `📞 ${p.name} is calling you!`);
+    sendCall(t);
+  });
+  socket.on('callAnswer', (yes) => {
+    const a = p.callIn; p.callIn = null;
+    if (!a || Date.now() - a.at > CALL_RING_SECONDS * 1000) return sendCall(p);
+    const t = liveUser(a.from);
+    if (!t) { notice(p, 'They hung up.'); return sendCall(p); }
+    if (yes !== true) { notice(t, `${p.name} declined your call.`); return sendCall(p); }
+    if (p.call || t.call) { notice(p, 'One of you is already on a call.'); return sendCall(p); }
+    p.call = t.userId; t.call = p.userId;
+    notice(p, `On a call with ${t.name}.`); notice(t, `${p.name} picked up.`);
+    sendCall(p); sendCall(t);
+  });
+  socket.on('callEnd', () => {
+    const t = p.call ? liveUser(p.call) : null;
+    p.call = null; if (t) { t.call = null; notice(t, `${p.name} ended the call.`); sendCall(t); }
+    sendCall(p);
+  });
+  socket.on('garageOpen', () => { if (allow(p.socialTimes, 20, 10000)) sendGarage(p); });
+  if (process.env.GARAGE_TEST) socket.on('garageTp', (w) => { const t = w === 'home' ? homeDoorOf(p) : lotsOf(p.city)[Number(w) || 0]; if (t) { p.x = p.tx = t.x; p.z = p.tz = t.z; } });
+  socket.on('vehicleUpgrade', (req) => {
+    if (!req || typeof req.id !== 'string' || typeof req.cat !== 'string' || !allow(p.socialTimes, 20, 10000)) return;
+    if (!p.vehicles.includes(req.id) || !Object.hasOwn(VEHICLES, req.id) || !UP_IDS.includes(req.cat)) return;
+    if (p.drive) return notice(p, 'Park your vehicle first.');
+    const up = upOf(p.garage, req.id), lv = up[req.cat];
+    if (lv >= UP_MAX) return notice(p, 'That upgrade is already at the top level.');
+    const cost = upgradeCost(VEHICLES[req.id].cost, req.cat, lv + 1);
+    if (p.cash < cost) return notice(p, `That upgrade costs ₦${cost.toLocaleString('en-NG')}.`);
+    p.cash -= cost; addFlow(p.bank, cost);
+    p.garage.u[req.id] = { ...up, [req.cat]: lv + 1 };
+    progGain(p, 'upgrade');
+    notice(p, `${UPGRADES[req.cat].label} level ${lv + 1} fitted to your ${VEHICLES[req.id].label}.`);
+    save(p); sendGarage(p);
+  });
+  socket.on('garageBuild', () => {
+    if (!allow(p.socialTimes, 12, 10000)) return;
+    if (p.garage.g) return notice(p, 'You already have a garage.');
+    if (p.cash < GARAGE_COST) return notice(p, `A private garage costs ₦${GARAGE_COST.toLocaleString('en-NG')}.`);
+    p.cash -= GARAGE_COST; p.garage.g = true;
+    notice(p, `Your private garage is built. It holds ${GARAGE_SLOTS} vehicles. Park next to your front door.`);
+    save(p); sendGarage(p);
+  });
+  socket.on('garagePark', (id) => {
+    if (!allow(p.socialTimes, 20, 10000) || typeof id !== 'string' || !p.vehicles.includes(id) || !Object.hasOwn(VEHICLES, id)) return;
+    if (isParked(p.garage, id)) return notice(p, 'That vehicle is already parked.');
+    if (p.room !== 'street' || p.trip) return notice(p, 'Go out on the street to park.');
+    const z = zoneOfPlayer(p);
+    if (!z) return notice(p, 'You must be inside your garage area or a car park. See the Garage app.');
+    if (p.drive && Math.abs(p.drive.v) > 3) return notice(p, 'Slow down before you park.');
+    if (p.drive && activeVehicle(p, p.drive.kind) !== id) return notice(p, 'Get out of your vehicle first.');
+    if (z.at === 'home') {
+      if (parkedIn(p.garage, 'home', p.homeCity).length >= GARAGE_SLOTS) return notice(p, 'Your garage is full.');
+    } else {
+      if (parkedIn(p.garage, 'lots', p.city).length >= LOT_SLOTS) return notice(p, `You can keep ${LOT_SLOTS} vehicles in car parks.`);
+      if (p.cash < LOT_FEE) return notice(p, `Parking costs ₦${LOT_FEE.toLocaleString('en-NG')}.`);
+      p.cash -= LOT_FEE;
+    }
+    if (p.drive) stopDriving(p);
+    p.garage.v[id] = { at: z.at, city: p.city };
+    notice(p, `${VEHICLES[id].label} parked at ${z.name}.`);
+    save(p); sendVeh(p);
+  });
+  socket.on('garageTake', (id) => {
+    if (!allow(p.socialTimes, 20, 10000) || typeof id !== 'string') return;
+    const s = p.garage.v[id];
+    if (!s || !p.vehicles.includes(id)) return;
+    if (p.room !== 'street' || p.trip) return notice(p, 'Go out on the street first.');
+    const z = zoneOfPlayer(p);
+    if (!z || z.at !== s.at || s.city !== p.city) return notice(p, 'Go to where it is parked to take it out.');
+    delete p.garage.v[id];
+    p.vehicles = p.vehicles.filter((x) => x !== id).concat(id);
+    notice(p, `You took out your ${VEHICLES[id].label}.`);
+    save(p); sendVeh(p);
+  });
+  socket.on('garageValet', (id) => {
+    if (!allow(p.socialTimes, 20, 10000) || typeof id !== 'string') return;
+    const s = p.garage.v[id];
+    if (!s || !p.vehicles.includes(id)) return;
+    if (s.city !== p.city) return notice(p, `It is parked in ${CITIES[s.city] ? CITIES[s.city].name : 'another city'}. Go there first.`);
+    if (p.cash < VALET_FEE) return notice(p, `A valet costs ₦${VALET_FEE.toLocaleString('en-NG')}.`);
+    p.cash -= VALET_FEE; delete p.garage.v[id];
+    p.vehicles = p.vehicles.filter((x) => x !== id).concat(id);
+    notice(p, `The valet brought your ${VEHICLES[id].label}.`);
+    save(p); sendVeh(p);
+  });
+  if (process.env.RACE_TEST) socket.on('raceTp', (w) => { const r = raceOf(p); if (!r) return; const t = w === 'start' ? r.route.start : targetOf(r, r.entries.get(p.userId).idx); p.x = p.tx = t.x; p.z = p.tz = t.z; if (p.drive) { p.drive.x = t.x; p.drive.z = t.z; } });
+  socket.on('raceOpen', () => { if (allow(p.socialTimes, 20, 10000)) sendRace(p); });
+  socket.on('raceCreate', (req) => {
+    if (!allow(p.socialTimes, 8, 10000)) return;
+    if (raceOf(p)) return notice(p, 'You are already in a race.');
+    if (jailLeft(p)) return;
+    const c = checkConfig(req, p.cash);
+    if (!c.ok) return notice(p, c.why);
+    const el = raceEligible(p, c.cfg.cls);
+    if (!el.ok) return notice(p, el.why);
+    const route = makeRoute(ctxOf(p).layout, c.cfg.format, Math.random);
+    if (!route) return notice(p, 'Could not find a route in this city.');
+    const id = 'r' + (++raceSeq) + '-' + Date.now().toString(36);
+    const r = { id, city: p.city, creatorId: p.userId, creatorName: p.name, name: c.cfg.name, format: c.cfg.format, laps: c.cfg.laps, max: c.cfg.max, minEntry: c.cfg.minEntry, split: c.cfg.split, cls: c.cfg.cls, vis: c.cfg.vis, code: String(1000 + Math.floor(Math.random() * 9000)), route, entries: new Map(), state: 'open', openedAt: Date.now(), goAt: 0, endsAt: 0, firstAt: 0, results: [] };
+    p.cash -= c.cfg.stake;
+    r.entries.set(p.userId, { name: p.name, stake: c.cfg.stake, idx: 0, done: false, ms: 0, lastAt: 0 });
+    q.escrowSet.run(id, p.userId, c.cfg.stake);
+    RACES.set(id, r);
+    notice(p, `Race "${r.name}" is open. Your ₦${c.cfg.stake.toLocaleString('en-NG')} stake is held until the race ends.`);
+    save(p); sendRaceCity(p.city);
+  });
+  socket.on('raceJoin', (req) => {
+    if (!req || typeof req.id !== 'string' || !allow(p.socialTimes, 10, 10000)) return;
+    const r = RACES.get(req.id) || [...RACES.values()].find((x) => x.vis === 'private' && x.city === p.city && x.code === String(req.code || '') && x.state === 'open');
+    if (!r || r.state !== 'open') return notice(p, 'That race is not open.');
+    if (raceOf(p)) return notice(p, 'You are already in a race.');
+    if (r.city !== p.city) return notice(p, 'That race is in another city.');
+    if (r.vis === 'private' && String(req.code || '') !== r.code) return notice(p, 'Wrong race code.');
+    if (r.entries.size >= r.max) return notice(p, 'That race is full.');
+    const stake = Math.floor(Number(req.stake));
+    if (!(stake >= r.minEntry)) return notice(p, `You must stake at least ₦${r.minEntry.toLocaleString('en-NG')}.`);
+    if (stake > p.cash) return notice(p, 'You do not have enough cash for that stake.');
+    const el = raceEligible(p, r.cls);
+    if (!el.ok) return notice(p, el.why);
+    p.cash -= stake;
+    r.entries.set(p.userId, { name: p.name, stake, idx: 0, done: false, ms: 0, lastAt: 0 });
+    q.escrowSet.run(r.id, p.userId, stake);
+    raceNote(r, `${p.name} joined with a ₦${stake.toLocaleString('en-NG')} stake. Pool: ₦${racePool(r).toLocaleString('en-NG')}.`);
+    save(p); sendRaceCity(p.city);
+  });
+  socket.on('raceRaise', (add) => {
+    const r = raceOf(p), a = Math.floor(Number(add));
+    if (!r || r.state !== 'open' || !(a > 0) || !allow(p.socialTimes, 10, 10000)) return;
+    if (a > p.cash) return notice(p, 'You do not have enough cash.');
+    const e = r.entries.get(p.userId);
+    p.cash -= a; e.stake += a; q.escrowSet.run(r.id, p.userId, e.stake);
+    notice(p, `Your stake is now ₦${e.stake.toLocaleString('en-NG')}. A bigger stake adds to the pool and gives a little extra race XP, but not a bigger share of the prize.`);
+    save(p); sendRaceCity(p.city);
+  });
+  socket.on('raceLeave', () => {
+    const r = raceOf(p);
+    if (!r || r.state !== 'open') return notice(p, 'You can only leave before the race starts.');
+    if (r.creatorId === p.userId) return raceCancel(r, 'The creator cancelled the race.');
+    raceRefundOne(r, p.userId, 'You left the race. Your stake was refunded.'); sendRaceCity(p.city);
+  });
+  socket.on('raceStart', () => {
+    const r = raceOf(p);
+    if (!r || r.state !== 'open' || r.creatorId !== p.userId) return;
+    if (r.entries.size < 2) return notice(p, 'You need at least 2 racers. If nobody joins, cancel and your stake comes back.');
+    const away = [...r.entries.keys()].filter((id) => { const d = raceDist(r, liveUser(id)); return d < 0 || d > START_RADIUS; }).map((id) => r.entries.get(id).name);
+    if (away.length) return notice(p, `Everyone must be within ${START_RADIUS} m of the start line. Waiting for: ${away.join(', ')}.`);
+    r.state = 'countdown'; r.goAt = Date.now() + COUNTDOWN_SECONDS * 1000;
+    raceNote(r, `The race starts in ${COUNTDOWN_SECONDS} seconds! Get in your vehicle.`);
+    sendRaceCity(p.city);
+  });
   socket.on('deliveryCancel', () => { if (p.deliv) delivFinish(p, 'Delivery cancelled.'); });
   socket.on('progOpen', () => { if (allow(p.socialTimes, 12, 10000)) sendProg(p); });
   socket.on('propsOpen', sendProps);

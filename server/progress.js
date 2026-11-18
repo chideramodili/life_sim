@@ -109,6 +109,11 @@ export const ACHIEVEMENTS = [
   { id: 'a_fare200', name: 'City Legend', text: 'Complete 200 taxi fares.', goal: 200, val: (P) => P.st.fares || 0, cash: 300000, xp: 800 },
   { id: 'a_party5', name: 'Party Animal', text: 'Join or host 5 parties.', goal: 5, val: (P) => P.st.party || 0, cash: 30000, xp: 150 },
   { id: 'a_host3', name: 'Event Host', text: 'Host 3 parties.', goal: 3, val: (P) => P.st.host || 0, cash: 40000, xp: 200 },
+  { id: 'a_upg1', name: 'Gearhead', text: 'Fit your first vehicle upgrade.', goal: 1, val: (P) => P.st.upg || 0, cash: 5000, xp: 40 },
+  { id: 'a_upg12', name: 'Master Tuner', text: 'Fit 12 vehicle upgrades.', goal: 12, val: (P) => P.st.upg || 0, cash: 100000, xp: 400 },
+  { id: 'a_race1', name: 'On the Grid', text: 'Finish or enter your first race.', goal: 1, val: (P) => P.st.races || 0, cash: 5000, xp: 40 },
+  { id: 'a_podium5', name: 'Podium Regular', text: 'Finish in the top three of 5 races.', goal: 5, val: (P) => P.st.podiums || 0, cash: 60000, xp: 300 },
+  { id: 'a_racewin5', name: 'Champion', text: 'Win 5 races.', goal: 5, val: (P) => P.st.raceWins || 0, cash: 120000, xp: 600 },
   { id: 'a_love1', name: 'Hopeless Romantic', text: 'Start dating another player.', goal: 1, val: (P) => P.st.loves || 0, cash: 5000, xp: 40 },
   { id: 'a_date10', name: 'Date Night Regular', text: 'Go on 10 date nights.', goal: 10, val: (P) => P.st.dates || 0, cash: 40000, xp: 200 },
   { id: 'a_wed1', name: 'Just Married', text: 'Get married.', goal: 1, val: (P) => P.st.wed || 0, cash: 100000, xp: 500 },
@@ -126,7 +131,7 @@ export const ACHIEVEMENTS = [
 ];
 
 // ---------- State ----------
-const STATS = ['shifts', 'earned', 'spent', 'buys', 'sent', 'chat', 'knocks', 'acts', 'trips', 'saved', 'deliv', 'delM', 'fares', 'taxiM', 'rateSum', 'rateN', 'chests', 'rallies', 'mgmt', 'loves', 'dates', 'wed', 'party', 'host'];
+const STATS = ['shifts', 'earned', 'spent', 'buys', 'sent', 'chat', 'knocks', 'acts', 'trips', 'saved', 'deliv', 'delM', 'fares', 'taxiM', 'rateSum', 'rateN', 'chests', 'rallies', 'mgmt', 'loves', 'dates', 'wed', 'party', 'host', 'upg', 'races', 'raceWins', 'podiums', 'raceWon'];
 export const defaultProg = () => ({ xp: 0, tok: 0, wins: 0, lv: 1, st: Object.fromEntries(STATS.map((k) => [k, 0])), pl: [], bd: [], ach: {}, dk: '', d: null, wk: '', w: null });
 const num = (v, lo, hi, d) => (Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d);
 function parseSet(raw, scope) {
@@ -251,6 +256,12 @@ export function record(prog, ev, n, now, seedName, key) {
     else if (ev === 'wed') { st.wed += n; prog.xp += 200 * n; }
     else if (ev === 'party') { st.party += n; prog.xp += 15 * n; }
     else if (ev === 'host') { st.host += n; prog.xp += 25 * n; }
+    else if (ev === 'upgrade') { st.upg += n; prog.xp += 20 * n; }
+    else if (ev === 'race') { st.races += n; prog.xp += 30 * n; }
+    else if (ev === 'racexp') prog.xp += n;
+    else if (ev === 'podium') { st.podiums += n; prog.xp += 50 * n; }
+    else if (ev === 'racewin') { st.raceWins += n; prog.xp += 100 * n; }
+    else if (ev === 'racewon') st.raceWon += n;
     else if (ev === 'manage') { st.mgmt += n; prog.xp += 8 * n; }
     else if (ev === 'chest') { st.chests += n; prog.xp += 20 * n; }
     else if (ev === 'rally') { st.rallies += n; prog.xp += 40 * n; }

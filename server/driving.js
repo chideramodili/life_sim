@@ -13,7 +13,9 @@ export const newDrive = (kind, x, z, ry = 0, mul = 1) => ({ kind, x, z, ry, v: 0
 // Speed and heading from the controls. steer: -1 (left) .. 1 (right); thr: -1 (brake / reverse) .. 1 (go).
 export function stepSpeed(d, input, dt) {
   const k0 = VEH[d.kind], m = d.mul || 1;
-  const k = { ...k0, max: k0.max * m, accel: k0.accel * m };
+  const u = d.up || {};                        // upgrade levels (0-3), see garage.js
+  const e = u.engine || 0, t = u.trans || 0, br = u.brakes || 0, ti = u.tires || 0;
+  const k = { ...k0, max: k0.max * m * (1 + 0.04 * e), accel: k0.accel * m * (1 + 0.05 * e) * (1 + 0.08 * t), brake: k0.brake * (1 + 0.1 * br), turn: k0.turn * (1 + 0.06 * ti) };
   const steer = clamp(Number(input.steer) || 0, -1, 1);
   const thr = clamp(Number(input.thr) || 0, -1, 1);
   if (thr > 0.05) d.v += (d.v < -0.1 ? k.brake : k.accel * thr) * dt;
