@@ -16,6 +16,10 @@ import { initTaxi } from './taxiUi.js';
 import { initSpecial } from './specialUi.js';
 import { initLove } from './loveUi.js';
 import { initParty } from './partyUi.js';
+import { initRec } from './recUi.js';
+import { initHouse } from './houseUi.js';
+import { initRealMap } from './realMapUi.js';
+import { createDistrict } from './districtMap.js';
 import { initBoards } from './boardsUi.js';
 import { initVoice } from './voiceUi.js';
 import { initGarage } from './garageUi.js';
@@ -75,6 +79,9 @@ const taxi = initTaxi(socket, () => street);
 const special = initSpecial(socket, () => street);
 initLove(socket);
 const party = initParty(socket, () => street);
+const rec = initRec(socket, () => street);
+initHouse(socket);
+initRealMap(socket);
 initBoards(socket);
 initVoice(socket);
 const garage = initGarage(socket, () => street);
@@ -176,6 +183,7 @@ function applyDaylight() {
 
 // ---------- Rooms ----------
 let ground = null;
+let district = null;   // the real-map area, when you are in it
 let grid = null;
 const decor = new THREE.Group();
 scene.add(decor);
@@ -220,6 +228,17 @@ async function compileScene() {
   try { if (renderer.compileAsync) await renderer.compileAsync(scene, camera); else renderer.compile(scene, camera); } catch { try { renderer.compile(scene, camera); } catch { /* the first frame will compile instead */ } }
 }
 // Put a man and a woman into the real scene for a moment so their shaders (skin, hair, clothes) are ready too.
+// Objects outside the camera view are skipped by the renderer, so their geometry and textures are only uploaded to the graphics chip
+// the first time you turn towards them. That is the "first time I look there it freezes" lag. Draw everything once, with culling
+// switched off, while the loading screen is still up, so every upload happens now.
+function uploadEverything() {
+  const off = [];
+  try {
+    scene.traverse((o) => { if (o.frustumCulled) { o.frustumCulled = false; off.push(o); } });
+    renderer.render(scene, camera);
+  } catch { /* the normal frames will do it instead */ }
+  for (const o of off) o.frustumCulled = true;
+}
 async function warmAvatars() {
   if (warmedAvatars) return; warmedAvatars = true;
   await new Promise((res) => whenModelReady(res));
@@ -232,6 +251,7 @@ async function warmAvatars() {
   }
   await new Promise((r) => setTimeout(r, 350));   // hair is fetched on demand
   await compileScene();
+  uploadEverything();
   for (const grp of tmp) { detachModel(grp); scene.remove(grp); }
 }
 async function warmUpPlace(key) {
@@ -239,12 +259,16 @@ async function warmUpPlace(key) {
   loadStep('Preparing the place…', 40);
   await nextFrames(1);
   await compileScene();
+  uploadEverything();
+  await nextFrames(1);
   loadStep('Getting the people ready…', 70);
   await warmAvatars();
   loadStep('Almost there…', 95);
+  uploadEverything();
   await nextFrames(2);
   warmedPlaces.add(key);
   hideLoading();
+  perfMark(key);
 }
 
 // Build the ground, four corner pillars, and a name sign for a room.
@@ -255,7 +279,7 @@ function buildRoom(info) {
   setFpv(false);
   roomInfoNow = info;
   snapCam = true;
-  $('fpvBtn').hidden = Boolean(info.city);
+  $('fpvBtn').hidden = Boolean(info.city || info.district);
   if (ground) scene.remove(ground);
   if (grid) scene.remove(grid);
   ground = null;
@@ -265,6 +289,7 @@ function buildRoom(info) {
     street.dispose();
     street = null;
   }
+  if (district) { scene.remove(district.group); district.dispose(); district = null; }
   decor.clear();
   doorAnims.length = 0;
   scene.fog = null;
@@ -282,13 +307,23 @@ function buildRoom(info) {
     lastLight = -1;
     return;
   }
+  if (info.district) {
+    // The Real Map: an open walkable area drawn from real OpenStreetMap data. No walls, no sign, no exit door.
+    interior.hide();
+    district = createDistrict(info.district);
+    scene.add(district.group);
+    scene.fog = new THREE.Fog(scene.background, 120, 400);
+    lastLight = -1;
+    return;
+  }
   // Buildings are real rooms: walls, windows, floors, props, and people (interior.js). Your Home also gets a fence and garden.
-  interior.show(info.id === 'friendhome' ? 'home' : info.id === 'biz' ? `biz_${info.bizKind || 'cafe'}` : info.id, info.bizStaff);
+  if (info.id === 'biz' && info.house) interior.showHouse(info.house);
+  else interior.show(info.id === 'friendhome' ? 'home' : info.id === 'biz' ? `biz_${info.bizKind || 'cafe'}` : info.id, info.bizStaff);
   const sign = textSprite(info.id === 'friendhome' ? `${info.hostName || 'A friend'}'s Home`.slice(0, 22) : info.name, info.accent, 512, 128, 72);
   sign.scale.set(5, 1.25, 1);
   sign.position.set(0, 3.1, -9.6);
-  if (info.id !== 'home') decor.add(sign);
-  if (info.exit) {
+  if (info.id !== 'home' && !info.house) decor.add(sign);
+  if (info.exit && !(info.id === 'biz' && info.house)) {
     // The way out: a glowing door on the south edge. Walk up to it and tap "Go outside".
     const frame = new THREE.Mesh(new THREE.BoxGeometry(3, 3.2, 0.3), new THREE.MeshStandardMaterial({ color: info.accent, emissive: info.accent, emissiveIntensity: 0.5 }));
     frame.position.set(info.exit.x, 1.6, info.exit.z + 0.3);
@@ -1098,7 +1133,7 @@ async function leaveCabin() {
   lastLight = -1;
   $('cabinHint').hidden = true;
   document.body.classList.remove('seated');
-  $('fpvBtn').hidden = Boolean(roomInfoNow && roomInfoNow.city);
+  $('fpvBtn').hidden = Boolean(roomInfoNow && (roomInfoNow.city || roomInfoNow.district));
   const a = avatars.get(myId);
   if (a) a.group.visible = !a.veh || showsRider(a);
   await fade(0, 600);
@@ -1181,7 +1216,7 @@ window.addEventListener('pointercancel', endSeatLook);
 
 let fpv = false, fpvYaw = 0, fpvPitch = 0, fpvDrag = null, fpvLast = null, fpvLastLook = 0;
 function setFpv(on) {
-  if (on && (!roomInfoNow || roomInfoNow.city)) on = false;
+  if (on && (!roomInfoNow || roomInfoNow.city || roomInfoNow.district)) on = false;
   if (on === fpv) return;
   fpv = on;
   const me = avatars.get(myId);
@@ -1268,7 +1303,7 @@ function followMe(dt) {
       if (homeSpin.t >= 1) homeSpin = null;
     }
   }
-  if (snapCam && !roomInfoNow.city) {
+  if (snapCam && !roomInfoNow.city && !roomInfoNow.district) {
     // Phones are tall and narrow, so the camera sits further back to show the whole room.
     const k = window.innerWidth < window.innerHeight ? 1.7 : 1;
     controls.maxDistance = 50;
@@ -1277,6 +1312,14 @@ function followMe(dt) {
     snapCam = false;
   }
   if (!me) return;
+  if (snapCam && roomInfoNow.district) {
+    // The real map is open ground: the camera stands behind you, high enough to see the streets, and follows you.
+    const p = me.group.position;
+    controls.target.set(p.x, 0, p.z);
+    camera.position.set(p.x, 48, p.z + 24);
+    controls.maxDistance = 90;
+    snapCam = false;
+  }
   if (snapCam && roomInfoNow.city) {
     const p = me.group.position;
     controls.target.set(p.x, 0, p.z);
@@ -1302,7 +1345,7 @@ function followMe(dt) {
     controls.maxDistance = 160;
     snapCam = false;
   }
-  if (roomInfoNow.city) {
+  if (roomInfoNow.city || roomInfoNow.district) {
     const dx = me.group.position.x - controls.target.x;
     const dz = me.group.position.z - controls.target.z;
     controls.target.x += dx * f;
@@ -1376,6 +1419,11 @@ function updateDoorButton(now) {
         if (dist <= 3.3 && (!best || dist < best.dist)) best = { d, dist };
       }
       if (best) want = best.d.friend ? { kind: 'visit', room: 'visit:' + best.d.friend, friend: best.d.friend, name: best.d.name } : { kind: 'enter', room: best.d.room, biz: best.d.biz, name: best.d.name };
+    } else if (roomInfoNow.district) {
+      // Real places you can walk into (banks, hotels, clinics...) show an Enter button when you are at their door.
+      let best = null;
+      for (const q of roomInfoNow.pois || []) { if (!q.e) continue; const dist = Math.hypot(x - q.x, z - q.z); if (dist <= 12 && (!best || dist < best.dist)) best = { q, dist }; }
+      if (best) want = { kind: 'enter', room: 'poi' + best.q.i, poi: best.q.i, name: best.q.n };
     } else if (roomInfoNow.exit && Math.hypot(x - roomInfoNow.exit.x, z - 8.5) <= 3.3) {
       want = { kind: 'out' };
     }
@@ -1390,12 +1438,29 @@ function updateDoorButton(now) {
 $('skipRide').addEventListener('click', () => socket.emit('skipRide'));
 $('doorBtn').addEventListener('click', () => {
   if (!doorTarget) return;
-  if (doorTarget.kind === 'enter' && doorTarget.room === 'biz') socket.emit('bizEnter', doorTarget.biz);
+  if (doorTarget.kind === 'enter' && doorTarget.poi !== undefined) socket.emit('districtEnter', doorTarget.poi);
+  else if (doorTarget.kind === 'enter' && doorTarget.room === 'biz') socket.emit('bizEnter', doorTarget.biz);
   else if (doorTarget.kind === 'enter') socket.emit('enter', doorTarget.room);
   else if (doorTarget.kind === 'visit') socket.emit('visit', doorTarget.friend);
   else socket.emit('goOutside');
 });
 
+// ---------- Performance readout (?perf in the address, or turn on in Settings > Support later) ----------
+// Shows frames per second, the longest freeze since you last entered a place, and what the renderer is drawing. Send me a screenshot
+// of this right after the lag happens and I can tell what it was.
+const PERF_ON = location.search.includes('perf') || (() => { try { return localStorage.getItem('perf') === '1'; } catch { return false; } })();
+let perfFrom = 0, perfWorst = 0, perfKey = '', perfEl = null, perfFrames = 0, perfAt = performance.now();
+function perfMark(key) { perfFrom = performance.now(); perfWorst = 0; perfKey = key; }
+if (PERF_ON) {
+  perfEl = document.createElement('pre');
+  perfEl.style.cssText = 'position:fixed;left:6px;top:64px;z-index:99;margin:0;padding:6px 8px;border-radius:8px;background:rgba(0,0,0,.65);color:#9f9;font:11px/1.35 monospace;pointer-events:none;white-space:pre';
+  document.body.append(perfEl);
+  setInterval(() => {
+    const now = performance.now(), fps = Math.round((perfFrames * 1000) / Math.max(1, now - perfAt)); perfFrames = 0; perfAt = now;
+    const i = renderer.info;
+    perfEl.textContent = `fps ${fps}   ratio ${prNow.toFixed(2)}\nworst frame since entering ${perfKey || '-'}: ${Math.round(perfWorst)} ms\ncalls ${i.render.calls}   tris ${i.render.triangles}\ngeometries ${i.memory.geometries}   textures ${i.memory.textures}\nshaders ${i.programs ? i.programs.length : '?'}`;
+  }, 500);
+}
 // ---------- Loop ----------
 const clock = new THREE.Clock();
 // Self-adjusting sharpness: if frames take too long, draw fewer pixels; if there is plenty of room, sharpen again.
@@ -1413,6 +1478,7 @@ function tuneSharpness(dt) {
 }
 renderer.setAnimationLoop(() => {
   const dt = clock.getDelta();
+  if (PERF_ON) { perfFrames++; if (perfFrom && performance.now() - perfFrom < 10000 && dt * 1000 > perfWorst) perfWorst = dt * 1000; }
   tuneSharpness(dt);
   const k = 1 - Math.exp(-dt * 10); // smooth movement between server updates
   const tnow = performance.now() / 1000;
@@ -1474,6 +1540,7 @@ renderer.setAnimationLoop(() => {
   applyDaylight();
   updateDoors(dt);
   interior.update(dt, world.daylight());
+  if (district) district.update(camera.position.x, camera.position.z);
   if (street) { street.setViewer(camera.position.x, camera.position.z); street.setPeople([...avatars.values()].filter((a) => a.group.visible || a.veh).map((a) => (a.veh ? a.veh.position : a.group.position))); street.update(dt); }
   updateCops(dt, performance.now() / 1000);
   walkInput.update();

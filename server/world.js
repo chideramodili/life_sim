@@ -2,12 +2,54 @@
 // This file only holds rules and small helper functions (no network, no database), so it is easy to test and to tune.
 
 // ---------- The clock ----------
-// 1 game day = 2 real hours by default (DAY_REAL_MIN=60 gives the old one-hour day). So 1 game minute = 5 real seconds.
 export const DAY_MIN = 1440;                 // minutes in a game day
-export const REAL_MS_PER_DAY = (Number(process.env.DAY_REAL_MIN) > 0 ? Number(process.env.DAY_REAL_MIN) : 120) * 60 * 1000;
+// ---- The day cycle. Two modes, set by the DAY_CYCLE environment variable:
+//  "periods" (the default): a 4-hour real-time day. The game clock runs faster or slower in each part of the day so the evening and
+//     morning feel long and the quiet night passes quicker. All players share it, and it is the server's clock only.
+//  "uniform": every game minute lasts the same (DAY_REAL_MIN real minutes per game day, default 120), as before.
+export const DAY_CYCLE = process.env.DAY_CYCLE === 'uniform' ? 'uniform' : 'periods';
+// from/to are game minutes (the night runs past midnight to 29:00); realMin is how long that period lasts in real minutes.
+export const PERIODS = [
+  { id: 'early', label: 'Early morning', from: 300, to: 480, realMin: 30 },    // 05:00-08:00
+  { id: 'morning', label: 'Morning', from: 480, to: 720, realMin: 60 },        // 08:00-12:00
+  { id: 'afternoon', label: 'Afternoon', from: 720, to: 1020, realMin: 50 },   // 12:00-17:00
+  { id: 'evening', label: 'Evening', from: 1020, to: 1200, realMin: 40 },      // 17:00-20:00
+  { id: 'night', label: 'Night', from: 1200, to: 1740, realMin: 60 },          // 20:00-05:00
+];
+export const PERIOD_REAL_MIN = PERIODS.reduce((n, p) => n + p.realMin, 0);   // 240
+export const REAL_MS_PER_DAY = DAY_CYCLE === 'periods' ? PERIOD_REAL_MIN * 60 * 1000 : (Number(process.env.DAY_REAL_MIN) > 0 ? Number(process.env.DAY_REAL_MIN) : 120) * 60 * 1000;
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-// Game minutes that pass during realMs real milliseconds.
+// The period a minute of the day (0..1439, fractions allowed) falls in.
+export function periodAt(minOfDay) {
+  const m = minOfDay < 300 ? minOfDay + DAY_MIN : minOfDay;     // 00:00-05:00 belongs to the night that began the evening before
+  return PERIODS.find((p) => m >= p.from && m < p.to) || PERIODS[PERIODS.length - 1];
+}
+// Game minutes per real millisecond at this minute of the day.
+export const gameMinPerMs = (minOfDay) => {
+  if (DAY_CYCLE === 'uniform') return DAY_MIN / REAL_MS_PER_DAY;
+  const p = periodAt(minOfDay);
+  return (p.to - p.from) / (p.realMin * 60000);
+};
+// Move the clock forward by realMs real milliseconds, passing through period boundaries correctly.
+// Returns { gameMin, dtMin }. `speed` (CLOCK_SPEED) multiplies everything (1 normally; bigger for demos and tests).
+export function advanceClock(gameMin, realMs, speed = 1) {
+  let g = gameMin, left = realMs;
+  for (let guard = 0; guard < 12 && left > 1e-9; guard++) {
+    const mod = ((g % DAY_MIN) + DAY_MIN) % DAY_MIN;
+    const rate = gameMinPerMs(mod) * speed;
+    if (DAY_CYCLE === 'uniform') { g += left * rate; left = 0; break; }
+    const p = periodAt(mod), m = mod < 300 ? mod + DAY_MIN : mod;
+    const toEnd = p.to - m;                                         // game minutes left in this period
+    const realToEnd = toEnd / rate;
+    if (left <= realToEnd) { g += left * rate; left = 0; } else { g += toEnd + 1e-6; left -= realToEnd; }
+  }
+  return { gameMin: g, dtMin: g - gameMin };
+}
+// Real milliseconds per game minute right now (what the browser needs to count between updates).
+export const realMsPerGameMin = (minOfDay, speed = 1) => 1 / (gameMinPerMs(minOfDay) * speed);
+
+// Game minutes that pass during realMs real milliseconds (the plain average, used for estimates).
 export const gameMinutesFor = (realMs, speed = 1) => (realMs / REAL_MS_PER_DAY) * DAY_MIN * speed;
 
 // gameMin is the total game minutes since the world began. Day 1 is a Monday.

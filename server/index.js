@@ -21,6 +21,7 @@ import { getCity, CITY, DOOR_REACH, routeBetween, pointOnRoute } from './city.js
 import { planFor, stepWork } from './workstyle.js';
 import { restoreBackup, startBackups, finalBackup } from './backup.js';
 import { speedFor, slide, findPath, roomBlockedFn, roomSolids } from './movement.js';
+import * as MAPS from './district.js';
 import { MOVE_FEE, CITIES, CITY_IDS, DEFAULT_CITY, isCity, parseCity, TICKETS, TICKET_IDS, ticketQuote, distanceBetween, HIGHWAY, neighbour, gateAt, arrivalFrom, placeName } from './cities.js';
 import { landMult, lotPrice, SELL_TO_GAME, BUILDING_BACK, MARKET_FEE, isAsk, marketNet } from './land.js';
 import { MAX_LOTS, SELL_LAND, BIZ_MAX_LEVEL, isAuto, autoStep as bizAutoStep, buildingValue, UPGRADE_COST, STOCK_CAP, KINDS, KIND_IDS, isKind, priceOf, validName, isOpen as bizOpenNow, newBiz, step as bizStep, buyStock, payStaff, hire as bizHire, doDuty, DUTIES, DUTY_IDS, dutyLeft, STAFF_WAGE, STAFF_MAX, STAFF_BOOST, HIRE_FEE } from './business.js';
@@ -29,7 +30,7 @@ import { PHONES, PHONE_IDS, parsePhones, serializePhones, buyPhone, usePhone, ha
 import { newChess, chessMove, chessStatus, legalMoves, newTwentyOne, twentyOneAct, handValue, newWordRace, wordGuess, GAME_KINDS, WORD_ROUNDS } from './games.js';
 import { MAX_FRIENDS, MAX_REQUESTS_OUT, DM_KEEP, DM_SHOW, PHONE_RE, NAME_RE, newPhone, phoneText, checkTransfer, transferLimits } from './friends.js';
 import {
-  DAY_MIN, REAL_MS_PER_DAY, timeText, gameMinutesFor,
+  DAY_MIN, REAL_MS_PER_DAY, timeText, gameMinutesFor, advanceClock, realMsPerGameMin, periodAt, DAY_CYCLE, PERIODS,
   isOpen, hoursText, minutesUntilClose,
   BILLS, BILL_IDS, parseBills, billStatus, tickBills, quote, applyPayment, consequences,
   EVENTS, EVENT_IDS, pickEvent, effectiveTravel,
@@ -50,6 +51,8 @@ import {
 } from './bank.js';
 import { DATE_COST, DATE_LOVE, DATE_COOLDOWN, MARRY_LOVE, RING, WEDDING_GIFT, DIVORCE_FEE, ASK_SECONDS, DATE_FX, coupleView, canMarry, stageName } from './love.js';
 import { PARTY_COST, PARTY_SECONDS, PARTY_RADIUS, PARTY_COOLDOWN_MS, GUEST_PAY, GUEST_CAP, TICK_FX, NAMES as PARTY_NAMES } from './party.js';
+import * as REC from './recreation.js';
+import * as HS from './house.js';
 import { FORMATS, CLASSES, SPLITS, START_RADIUS, COUNTDOWN_SECONDS, CP_REACH as RACE_REACH, FINISH_WINDOW_SECONDS, LOBBY_SECONDS, MAX_SPEED, checkConfig, makeRoute, totalCheckpoints, targetOf, raceSeconds, payouts, classOk, stakeXp, MIN_ENTRY_FLOOR, MIN_ENTRY_CAP, MAX_PLAYERS, MAX_LAPS } from './race.js';
 import { DAY_MS as RENT_DAY, RENT_MIN, RENT_MAX, MAX_DAYS as RENT_MAX_DAYS, MAX_TENANCIES, RENT_FEE, isRent, isDays, ownerNet as rentNet, startCost as rentStart, newLease, extend as rentExtendRule, parse as parseRent, stringify as rentText } from './rent.js';
 import { UPGRADES, UP_IDS, UP_MAX, upgradeCost, upOf, upTotal, GARAGE_COST, GARAGE_SLOTS, LOT_SLOTS, LOT_FEE, VALET_FEE, ZONE_RADIUS, parseGarage, lotsFor, zoneAt, parkedIn, isParked } from './garage.js';
@@ -113,6 +116,7 @@ const COLORS = ['#ff6b4a', '#ffc857', '#2ec4b6', '#3a86ff', '#ff4d8d', '#3ddc97'
 // "solo" rooms (your Home) are private: every player gets their own copy.
 const ROOMS = {
   plaza:  { name: 'Plaza',  color: '#4a3668', accent: '#ffc857', cap: 20, hours: null },
+  district: { name: 'Real map', color: '#2f4a3a', accent: '#7ad7ff', cap: 40, hours: null, hidden: true },   // the walkable real-map area (Abuja, Enugu)
   gym:    { name: 'Gym',    color: '#2f5d62', accent: '#ff6b4a', cap: 12, hours: { open: 5, close: 23 } },
   market: { name: 'Market', color: '#6b4a2f', accent: '#3ddc97', cap: 20, hours: { open: 6, close: 20 } },
   jobs:   { name: 'Jobs Center', color: '#3b4a6b', accent: '#3a86ff', cap: 15, hours: { open: 7, close: 21 } },
@@ -149,7 +153,7 @@ for (const id of CITY_IDS) {
 const LAGOS = CITY_CTX[DEFAULT_CITY];
 const ctxOf = (p) => CITY_CTX[p.city] || LAGOS;
 const CITY_LAYOUT = LAGOS.layout; // houses and homes are in Lagos for now
-const boundsOf = (id) => (id === 'street' ? { bx: CITY.bx, bz: CITY.bz } : { bx: BOUNDS, bz: BOUNDS });
+const boundsOf = (id) => (id === 'street' ? { bx: CITY.bx, bz: CITY.bz } : id === 'district' ? { bx: MAPS.HALF, bz: MAPS.HALF } : { bx: BOUNDS, bz: BOUNDS });
 const CITY_SPEED = 1.7;          // outdoors you walk briskly, because the city is big
 const INSIDE_EXIT = { x: 0, z: 9.5 }; // the door out of every building, on its south wall
 // Plots: every player has a house on a plot in a residential area. (With more players than plots, two players share the same spot. Homes are still private.)
@@ -399,7 +403,7 @@ db.exec(`
 
 // Upgrade older databases in place: add the new columns if they are missing.
 const existingColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
-for (const [n, d] of [['mgmt', "TEXT NOT NULL DEFAULT ''"], ['staff', 'INTEGER NOT NULL DEFAULT 0'], ['owed', 'REAL NOT NULL DEFAULT 0'], ['ask', 'INTEGER NOT NULL DEFAULT 0'], ['lease', "TEXT NOT NULL DEFAULT ''"]]) {
+for (const [n, d] of [['mgmt', "TEXT NOT NULL DEFAULT ''"], ['staff', 'INTEGER NOT NULL DEFAULT 0'], ['owed', 'REAL NOT NULL DEFAULT 0'], ['ask', 'INTEGER NOT NULL DEFAULT 0'], ['lease', "TEXT NOT NULL DEFAULT ''"], ['house', "TEXT NOT NULL DEFAULT ''"]]) {
   if (!db.prepare('PRAGMA table_info(lots)').all().some((c) => c.name === n)) db.exec(`ALTER TABLE lots ADD COLUMN ${n} ${d}`);
 }
 const addColumn = (name, ddl) => {
@@ -458,7 +462,7 @@ db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(Date.now());
 // Every query uses placeholders (?), so user input can never change the query itself.
 const q = {
   lotsAll: db.prepare('SELECT l.*, u.username AS ownerName FROM lots l JOIN users u ON u.id = l.owner'),
-  lotSet: db.prepare('INSERT OR REPLACE INTO lots (city, lot, owner, kind, name, level, stock, till, frac, built, staff, owed, ask, mgmt, lease) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
+  lotSet: db.prepare('INSERT OR REPLACE INTO lots (city, lot, owner, kind, name, level, stock, till, frac, built, staff, owed, ask, mgmt, lease, house) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'),
   lotDel: db.prepare('DELETE FROM lots WHERE city = ? AND lot = ?'),
   userByName: db.prepare('SELECT * FROM users WHERE username = ?'),
   userById: db.prepare('SELECT * FROM users WHERE id = ?'),
@@ -536,7 +540,8 @@ const world = {
 if (!Number.isFinite(world.gameMin) || world.gameMin < 0) world.gameMin = START_CLOCK_MIN;
 const saveWorld = () => q.setWorld.run('game_min', String(Math.floor(world.gameMin * 100) / 100));
 const minuteOfDay = () => ((Math.floor(world.gameMin) % DAY_MIN) + DAY_MIN) % DAY_MIN;
-const msPerGameMin = () => REAL_MS_PER_DAY / DAY_MIN / CLOCK_SPEED;
+const msPerGameMin = () => realMsPerGameMin(world.gameMin % DAY_MIN, CLOCK_SPEED);   // right now (changes with the part of the day)
+const msPerGameMinAvg = () => REAL_MS_PER_DAY / DAY_MIN / CLOCK_SPEED;                // the day's average, for "about X real time" estimates
 
 // Is this venue open right now? (Home and the Plaza never close.)
 const venueOpen = (roomId) => IGNORE_HOURS || isOpen(ROOMS[roomId].hours, minuteOfDay());
@@ -971,9 +976,16 @@ function roomInfo(id, p = null) {
     info.myPlot = p && ctx.id === p.homeCity ? plotOf(p).id : -1;
     const vv = p ? visitVenues(p) : null;
     info.visit = vv ? [...vv] : null;
+  } else if (id === 'district') {
+    const m = p ? MAPS.get(p.city) : null;
+    info.district = p ? p.city : null;
+    info.name = m ? `${ctx.def.name} · Real map` : 'Real map';
+    info.cityName = ctx.def.name;
+    info.pois = m ? m.pois.map((q) => ({ i: q.i, id: q.id, n: q.n, k: q.k, x: q.x, z: q.z, e: q.room ? 1 : 0 })) : [];
   } else if (id === 'biz') {
     info.exit = INSIDE_EXIT;
     const rec = p ? LOTS[p.city].get(p.bizLot) : null;
+    if (rec && rec.house && rec.house.cfg && !rec.biz) { info.name = `${rec.ownerName}'s house`; info.house = rec.house.cfg; info.bizLot = p.bizLot; info.owner = rec.ownerName; info.accent = '#c9a227'; }
     if (rec && rec.biz) { info.name = rec.biz.name; info.bizKind = rec.biz.kind; info.bizLot = p.bizLot; info.bizLevel = rec.biz.level; info.bizStaff = rec.biz.staff || 0; info.accent = { cafe: '#ff9f1c', minimart: '#4cc9a0', salon: '#ff7eb6', gym: '#7ad7ff' }[rec.biz.kind] || r.accent; info.owner = rec.ownerName; }
   } else if (id === 'friendhome') {
     info.exit = INSIDE_EXIT;
@@ -1010,7 +1022,7 @@ const notice = (p, text) => p.socket.emit('notice', text);
 const sendStory = (p) => p.socket.emit('story', story.view(p));
 const sendMutes = (p) => p.socket.emit('mutes', q.mutedNames.all(p.userId).map((r) => r.username));
 // What the browser needs to draw the clock. It counts on its own between updates.
-const clockInfo = () => ({ gameMin: world.gameMin, msPerMin: msPerGameMin() });
+const clockInfo = () => ({ gameMin: world.gameMin, msPerMin: msPerGameMin(), cycle: DAY_CYCLE, period: DAY_CYCLE === 'periods' ? periodAt(world.gameMin % DAY_MIN).id : null });
 const eventInfo = () => (world.event
   ? { id: world.event.id, title: world.event.title, text: world.event.text, secondsLeft: Math.max(0, Math.ceil((world.event.endsAt - Date.now()) / 1000)) }
   : null);
@@ -1025,7 +1037,7 @@ function billsInfo(p) {
       };
     }),
     cons: consequences(p.bills),
-    msPerMin: msPerGameMin(),
+    msPerMin: msPerGameMinAvg(),
   };
 }
 const sendBills = (p) => p.socket.emit('bills', billsInfo(p));
@@ -1492,6 +1504,73 @@ setInterval(() => {
   }
 }, 5000);
 
+// ---------- Recreation / Fun Spots (rules in recreation.js). Five spots per city: swim, cinema, fish, dance, football. One activity at a time; the server runs every timer. ----------
+const REC_CACHE = {};
+const spotsOf = (city) => REC_CACHE[city] || (REC_CACHE[city] = REC.spotsFor(CITY_CTX[city].layout, city));
+const recNeed = (p, fx) => { for (const k of ['fun', 'social', 'clean', 'energy']) if (fx[k]) p[k] = Math.max(0, Math.min(100, p[k] + fx[k])); };
+const recSpot = (p, kind, r = REC.REACH) => spotsOf(p.city).find((s) => s.kind === kind && REC.near(s, p, r)) || null;
+const recRoom = (p) => REC.capRoom(p.recEarn, Date.now()).room;
+function recPay(p, want) {   // cash from recreation is capped per hour
+  const cr = REC.capRoom(p.recEarn, Date.now());
+  const n = Math.max(0, Math.min(want, cr.room));
+  p.recEarn = REC.addEarn(cr.state, n, Date.now());
+  if (n) { p.cash += n; addFlow(p.bank, n); progGain(p, 'earn', n); }
+  return n;
+}
+function recActive(p) {
+  const r = p.rec;
+  if (!r) return null;
+  const now = Date.now();
+  if (r.kind === 'swim' || r.kind === 'cinema') return { kind: r.kind, endsIn: Math.max(0, r.endsAt - now), total: r.total, withFriend: Boolean(r.withFriend) };
+  if (r.kind === 'fish') return { kind: 'fish', state: r.state, catches: r.catches, earned: r.earned, last: r.last || '' };
+  if (r.kind === 'dance') return { kind: 'dance', startsIn: Math.max(0, r.t0 + 0 - now), t0In: r.t0 - now, leadMs: REC.DANCE_LEAD_MS, beatMs: REC.BEAT_MS, beats: REC.DANCE_BEATS, hits: r.taps.length };
+  if (r.kind === 'football') return { kind: 'football', left: r.left, goals: r.goals, last: r.last || '' };
+  return null;
+}
+function recView(p) {
+  const spots = spotsOf(p.city).map((s) => ({ kind: s.kind, x: s.x, z: s.z, icon: REC.SPOTS[s.kind].icon, title: REC.SPOTS[s.kind].title, text: REC.SPOTS[s.kind].text, fee: REC.SPOTS[s.kind].fee, dist: Math.round(Math.hypot(p.x - s.x, p.z - s.z)), here: REC.near(s, p) }));
+  const fbWait = Math.max(0, Math.ceil(((p.recFb || 0) + REC.KICK_COOLDOWN_MS - Date.now()) / 1000));
+  return { spots, active: recActive(p), cap: { room: recRoom(p), max: REC.EARN_CAP }, fbWait, fish: REC.FISH.map((f) => ({ name: f.name, min: f.min, max: f.max })), goalPay: REC.GOAL_PAY, kicks: REC.KICKS };
+}
+const sendRec = (p) => p.socket.emit('rec', recView(p));
+function recEnd(p, text) { p.rec = null; if (text) notice(p, text); sendRec(p); }
+function recDone(p, kind, fx, text) {
+  recNeed(p, fx);
+  progGain(p, 'rec');
+  if (fx.xp) progGain(p, 'xp', fx.xp);
+  notice(p, text);
+  save(p);
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const p of players.values()) {
+    const r = p.rec;
+    if (!r) continue;
+    const spot = spotsOf(p.city).find((s) => s.kind === r.kind);
+    if (p.room !== 'street' || p.trip || p.drive || jailLeft(p) || r.city !== p.city || !spot || !REC.near(spot, p, REC.STAY)) { recEnd(p, 'You walked away, so the activity stopped.'); continue; }
+    if (r.kind === 'swim' || r.kind === 'cinema') {
+      if (r.kind === 'cinema' && !r.withFriend) for (const o of players.values()) if (o !== p && o.rec && o.rec.kind === 'cinema' && o.city === p.city && isFriend(p, o)) { r.withFriend = true; o.rec.withFriend = true; }
+      if (now >= r.endsAt) {
+        const f = REC.FX[r.kind];
+        const fx = { ...f, social: (f.social || 0) + (r.withFriend ? f.friendSocial || 0 : 0) };
+        recDone(p, r.kind, fx, r.kind === 'swim' ? '🏊 What a swim! Fun and clean are way up.' : `🎬 Great film!${r.withFriend ? ' Watching with a friend gave extra social.' : ''}`);
+        recEnd(p, '');
+      }
+    } else if (r.kind === 'fish') {
+      if (r.state === 'wait' && now - r.castAt >= r.biteAt) { r.state = 'bite'; p.socket.emit('recBite'); }
+      else if (r.state === 'bite' && now - r.castAt > r.biteAt + REC.BITE_WINDOW_MS + REC.LATENCY_MS) { r.state = 'idle'; r.last = 'It got away. Be quicker next time.'; sendRec(p); }
+    } else if (r.kind === 'dance') {
+      if (now >= r.t0 + REC.danceDoneAt()) {
+        const hits = REC.danceScore(r.taps);
+        const fx = REC.danceFx(hits);
+        progGain(p, 'dance', hits >= 5 ? 1 : 0);
+        recDone(p, 'dance', fx, `💃 ${hits} of ${REC.DANCE_BEATS} beats on time. ${hits >= 6 ? 'You own that floor!' : hits >= 3 ? 'Nice moves.' : 'Keep practising.'}`);
+        recEnd(p, '');
+      }
+    }
+  }
+}, 250);
+
 // ---------- Leaderboards (rules in boards.js): rebuilt at most every 30 seconds from the saved players plus everyone online ----------
 let boardUsers = [], boardAt = 0;
 function boardsFor(p) {
@@ -1551,7 +1630,7 @@ function garageView(p) {
   const lots = lotsOf(p.city).map((l) => ({ id: l.id, name: l.name, x: l.x, z: l.z, dist: p.room === 'street' ? Math.round(Math.hypot(p.x - l.x, p.z - l.z)) : -1 }));
   const hd = homeDoorOf(p);
   return {
-    hasGarage: gar.g, garageCost: GARAGE_COST, slots: GARAGE_SLOTS, lotSlots: LOT_SLOTS, lotFee: LOT_FEE, valetFee: VALET_FEE,
+    hasGarage: gar.g, garageCost: ownsHouse(p.userId) ? 0 : GARAGE_COST, slots: GARAGE_SLOTS, lotSlots: LOT_SLOTS, lotFee: LOT_FEE, valetFee: VALET_FEE,
     inHomeCity: p.city === p.homeCity, home: hd ? { x: hd.x, z: hd.z, dist: p.room === 'street' ? Math.round(Math.hypot(p.x - hd.x, p.z - hd.z)) : -1 } : null,
     zone: z ? { at: z.at, name: z.name } : null, lots,
     usedHome: parkedIn(gar, 'home', p.homeCity).length, usedLots: parkedIn(gar, 'lots', p.city).length,
@@ -1989,9 +2068,12 @@ process.on('SIGTERM', shutdown);
 // Put a player into a room straight away (no trip). Used when a venue closes or the landlord locks the door.
 // This can push a room slightly over its cap for a moment, which is better than leaving someone stranded.
 // Boxes you cannot walk through where you are now: the room's own props plus, at home, the furniture placed there.
+const _houseSolidsCache = new WeakMap();
+const houseSolids = (cfg) => { let s = _houseSolidsCache.get(cfg); if (!s) { s = HS.solids(cfg); _houseSolidsCache.set(cfg, s); } return s; };
 function extraSolids(p) {
   if (p.room === HOME) return homeSolids(p.home);
   if (p.room === 'friendhome') { const host = byUser.get(p.visiting); return host ? homeSolids(host.home) : []; }
+  if (p.room === 'biz') { const rec = LOTS[p.city].get(p.bizLot); if (rec && rec.house && rec.house.cfg) return houseSolids(rec.house.cfg); }
   return null;
 }
 const HOSPITAL_BEDS = [{ x: -8, z: -5.9 }, { x: -1, z: -5.9 }]; // the middle bed holds the ambient patient
@@ -2048,6 +2130,7 @@ function moveNow(p, roomId, x = roomId === 'street' ? CITY.spawn.x : 0, z = room
   p.city = isCity(city) ? city : DEFAULT_CITY;
   if (roomId === HOME) p.city = p.homeCity; // your home is in the city you live in
   if (p.city !== prevCity) { p.friendsSig = ''; sendFriends(p, true); } // friends' houses differ in each city
+  if (roomId === 'street' || roomId === HOME) p.fromDistrict = null;
   p.trip = null;
   p.fxEnd = null; p.wfh = null; p.sitTo = null; p.frozenUntil = 0;
   if (p.lying) { p.lying = false; p.bedAt = null; p.anim = null; }
@@ -2233,23 +2316,25 @@ for (const id of CITY_IDS) LOTS[id] = new Map();
 for (const r of q.lotsAll.all()) {
   if (!LOTS[r.city]) continue;
   const rr = parseRent(r.lease);
-  LOTS[r.city].set(r.lot, { owner: r.owner, ownerName: r.ownerName, ask: r.ask || 0, rentAsk: rr.ask, lease: rr.lease, biz: r.kind && isKind(r.kind) ? { kind: r.kind, name: r.name || KINDS[r.kind].label, level: r.level, stock: r.stock, till: r.till, frac: r.frac, built: r.built, staff: r.staff || 0, owed: r.owed || 0, ...parseMgmt(r.mgmt) } : null });
+  LOTS[r.city].set(r.lot, { owner: r.owner, ownerName: r.ownerName, ask: r.ask || 0, rentAsk: rr.ask, lease: rr.lease, house: HS.parse(r.house), biz: r.kind && isKind(r.kind) ? { kind: r.kind, name: r.name || KINDS[r.kind].label, level: r.level, stock: r.stock, till: r.till, frac: r.frac, built: r.built, staff: r.staff || 0, owed: r.owed || 0, ...parseMgmt(r.mgmt) } : null });
 }
 let lotsDirty = false;
 const saveLot = (city, id) => {
   const rec = LOTS[city].get(id);
   if (!rec) q.lotDel.run(city, id);
-  else { const b = rec.biz; q.lotSet.run(city, id, rec.owner, b ? b.kind : null, b ? b.name : null, b ? b.level : 1, b ? b.stock : 0, b ? Math.round(b.till) : 0, b ? b.frac : 0, b ? b.built : 0, b ? b.staff || 0 : 0, b ? b.owed || 0 : 0, rec.ask || 0, b ? JSON.stringify({ rep: Math.round((b.rep ?? 50) * 10) / 10, promoUntil: b.promoUntil || 0, cd: b.cd || {} }) : '', rentText(rec.rentAsk, rec.lease)); }
+  else { const b = rec.biz; q.lotSet.run(city, id, rec.owner, b ? b.kind : null, b ? b.name : null, b ? b.level : 1, b ? b.stock : 0, b ? Math.round(b.till) : 0, b ? b.frac : 0, b ? b.built : 0, b ? b.staff || 0 : 0, b ? b.owed || 0 : 0, rec.ask || 0, b ? JSON.stringify({ rep: Math.round((b.rep ?? 50) * 10) / 10, promoUntil: b.promoUntil || 0, cd: b.cd || {} }) : '', rentText(rec.rentAsk, rec.lease), HS.stringify(rec.house)); }
 };
 // What a lot costs today: its starting price times how scarce land is in that city and how long land has been gaining value.
 // extra = -1 asks "what would it be after one more lot is back on the market".
 const cityLotCount = (city) => CITY_CTX[city].layout.lots.length;
 const landNow = (city, l, extra = 0) => lotPrice(l.price, landMult(Math.max(0, LOTS[city].size + extra), cityLotCount(city)));
-const sellToGame = (city, l, rec) => Math.round(landNow(city, l, -1) * SELL_TO_GAME) + (rec.biz ? Math.round(buildingValue(rec.biz) * BUILDING_BACK) : 0);
+const ownsHouse = (userId) => { for (const c of CITY_IDS) for (const rec of LOTS[c].values()) if (rec.owner === userId && rec.house && rec.house.cfg) return true; return false; };
+const houseCost = (rec) => (rec.house && rec.house.cfg ? HS.houseValue(rec.house.cfg) : 0);
+const sellToGame = (city, l, rec) => Math.round(landNow(city, l, -1) * SELL_TO_GAME) + (rec.biz ? Math.round(buildingValue(rec.biz) * BUILDING_BACK) : 0) + Math.round(houseCost(rec) * BUILDING_BACK);
 // Who runs a business: the owner, or the tenant while it is rented out.
 const opId = (rec) => (rec.lease ? rec.lease.tenant : rec.owner);
 const tenancies = (userId) => { const out = []; for (const c of CITY_IDS) for (const [id, rec] of LOTS[c]) if (rec.lease && rec.lease.tenant === userId) out.push({ city: c, id, rec }); return out; };
-const lotWorth = (city, l, rec) => landNow(city, l, 0) + (rec.biz ? buildingValue(rec.biz) : 0);
+const lotWorth = (city, l, rec) => landNow(city, l, 0) + (rec.biz ? buildingValue(rec.biz) : 0) + houseCost(rec);
 // Money for somebody who may be offline.
 const payUser = (userId, amount, text) => {
   const o = [...players.values()].find((x) => x.userId === userId);
@@ -2257,7 +2342,7 @@ const payUser = (userId, amount, text) => {
 };
 const lotViews = (city) => CITY_CTX[city].layout.lots.map((l) => {
   const rec = LOTS[city].get(l.id);
-  return { id: l.id, owner: rec ? rec.ownerName : null, kind: rec && rec.biz ? rec.biz.kind : null, name: rec && rec.biz ? rec.biz.name : null, level: rec && rec.biz ? rec.biz.level : 0, soldOut: Boolean(rec && rec.biz && rec.biz.stock <= 0), ask: rec && rec.ask ? rec.ask : 0, rent: rec && rec.rentAsk && !rec.lease ? rec.rentAsk : 0, leased: Boolean(rec && rec.lease), price: rec ? 0 : landNow(city, l) };
+  return { id: l.id, owner: rec ? rec.ownerName : null, kind: rec && rec.biz ? rec.biz.kind : null, name: rec && rec.biz ? rec.biz.name : null, level: rec && rec.biz ? rec.biz.level : 0, soldOut: Boolean(rec && rec.biz && rec.biz.stock <= 0), ask: rec && rec.ask ? rec.ask : 0, rent: rec && rec.rentAsk && !rec.lease ? rec.rentAsk : 0, leased: Boolean(rec && rec.lease), house: rec && rec.house && rec.house.cfg ? rec.house.cfg : null, price: rec ? 0 : landNow(city, l) };
 });
 const sendLots = (p) => p.socket.emit('lots', { city: p.city, list: lotViews(p.city) });
 const broadcastLots = (city) => { const key = spaceKey('street', 0, city); if (io.sockets.adapter.rooms.has(key)) io.to(key).emit('lots', { city, list: lotViews(city) }); };
@@ -2472,10 +2557,19 @@ const AUTO_TIMEOUT_MS = 180000;
 const inBuilding = (p) => Boolean(p.room && p.room !== 'street' && (isVenueDoor(p.room) || p.room === 'biz' || p.room === 'friendhome'));
 function startAuto(p, to) { p.auto = { to, stage: p.room === 'street' ? 'walk' : 'exit', since: Date.now(), d0: 0, repath: 0 }; p.sit = false; }
 function stopAuto(p, text) { p.auto = null; if (text) notice(p, text); }
+// Came in from the real map? Then the way out is back to that place's door in the real map, not the city street.
+function backToDistrict(p) {
+  const b = p.fromDistrict;
+  if (!b || b.city !== p.city || !MAPS.has(p.city)) { p.fromDistrict = null; return false; }
+  p.fromDistrict = null;
+  moveNow(p, 'district', b.x, b.z);
+  return true;
+}
 // Out of whatever building you are in, onto the street in front of its door.
 function exitBuilding(p) {
   if (p.room === 'biz') { const l = ctxOf(p).layout.lots[p.bizLot]; return moveNow(p, 'street', l ? l.door.x : CITY.spawn.x, l ? l.door.z : CITY.spawn.z); }
   if (p.room === 'friendhome') return showOut(p);
+  if (backToDistrict(p)) return;
   const d = doorFor(p, p.room);
   if (d) moveNow(p, 'street', d.x, d.z);
 }
@@ -2578,7 +2672,7 @@ io.on('connection', (socket) => {
   let room = has(ROOMS, saved.room) ? saved.room : START_ROOM;
   const bills = parseBills(saved.bills);
   // Saved in a venue that is closed now, or in a home that is locked? Start at the Plaza instead.
-  if (!venueOpen(room) || room === 'biz' || (room === HOME && consequences(bills).locked)) room = START_ROOM;
+  if (!venueOpen(room) || room === 'biz' || room === 'district' || (room === HOME && consequences(bills).locked)) room = START_ROOM;
   if ((saved.jail_until || 0) > Date.now()) room = 'police'; // still serving time
   const myHomeCity = parseCity(saved.home_city);
   const homeCity = room === HOME || room === 'friendhome' ? myHomeCity : parseCity(saved.city);
@@ -3162,6 +3256,13 @@ io.on('connection', (socket) => {
     const l = lotNear(p, id, true);
     if (!l) return;
     const rec = LOTS[p.city].get(id);
+    if (rec && rec.house && rec.house.cfg && !rec.biz) {
+      if (rec.owner !== p.userId && !rec.house.open && !isFriend(rec.owner, p.userId)) return notice(p, `${rec.ownerName}'s house is private. Only friends can visit.`);
+      let m = 0; for (const o of players.values()) if (o.room === 'biz' && o.city === p.city && o.bizLot === id) m++;
+      if (m >= 12) return notice(p, 'The house is full right now.');
+      p.bizLot = id;
+      return moveNow(p, 'biz', 0, 8);
+    }
     if (!rec || !rec.biz) return notice(p, 'Nothing is built here yet.');
     if (opId(rec) !== p.userId && !bizOpenNow(rec.biz.kind, minuteOfDay())) return notice(p, `${rec.biz.name} is closed.`);
     let n = 0;
@@ -3207,6 +3308,7 @@ io.on('connection', (socket) => {
     const rec = LOTS[p.city].get(req.id);
     if (!rec || rec.owner !== p.userId) return notice(p, 'That is not your lot.');
     if (rec.biz) return notice(p, 'There is already a business here.');
+    if (rec.house && rec.house.cfg) return notice(p, 'There is a house on this lot. Demolish it first.');
     const K = KINDS[req.kind];
     if (p.cash < K.build) return notice(p, `A ${K.label} costs ₦${K.build.toLocaleString('en-US')} to build.`);
     p.cash -= K.build;
@@ -3331,7 +3433,7 @@ io.on('connection', (socket) => {
       const own = rec.owner === p.userId, rented = Boolean(rec.lease && rec.lease.tenant === p.userId);
       if (!own && !rented) continue;
       const l = CITY_CTX[c].layout.lots[id];
-      out.push({ city: c, cityName: CITIES[c].name, id, kind: rec.biz ? rec.biz.kind : null, name: rec.biz ? rec.biz.name : null, level: rec.biz ? rec.biz.level : 0, auto: Boolean(rec.biz && isAuto(rec.biz)), till: rec.biz && !(own && rec.lease) ? Math.round(rec.biz.till) : 0, value: own ? lotWorth(c, l, rec) : 0, ask: own ? rec.ask || 0 : 0, here: c === p.city, rentAsk: own ? rec.rentAsk || 0 : 0, rentedOut: own && rec.lease ? { to: rec.lease.tenantName, perDay: rec.lease.rent, left: Math.max(0, Math.round((rec.lease.until - Date.now()) / 1000)) } : null, rented: rented ? { from: rec.ownerName, perDay: rec.lease.rent, left: Math.max(0, Math.round((rec.lease.until - Date.now()) / 1000)), deposit: rec.lease.deposit } : null });
+      out.push({ city: c, cityName: CITIES[c].name, id, kind: rec.biz ? rec.biz.kind : (rec.house && rec.house.cfg ? 'house' : null), name: rec.biz ? rec.biz.name : (rec.house && rec.house.cfg ? 'House' : null), level: rec.biz ? rec.biz.level : 0, auto: Boolean(rec.biz && isAuto(rec.biz)), till: rec.biz && !(own && rec.lease) ? Math.round(rec.biz.till) : 0, value: own ? lotWorth(c, l, rec) : 0, ask: own ? rec.ask || 0 : 0, here: c === p.city, rentAsk: own ? rec.rentAsk || 0 : 0, rentedOut: own && rec.lease ? { to: rec.lease.tenantName, perDay: rec.lease.rent, left: Math.max(0, Math.round((rec.lease.until - Date.now()) / 1000)) } : null, rented: rented ? { from: rec.ownerName, perDay: rec.lease.rent, left: Math.max(0, Math.round((rec.lease.until - Date.now()) / 1000)), deposit: rec.lease.deposit } : null });
     }
     return out;
   };
@@ -3513,6 +3615,86 @@ io.on('connection', (socket) => {
     for (const o of players.values()) if (o !== p && o.city === p.city) notice(o, `🎉 ${p.name} is throwing a party! Open the Party app.`);
     save(p); sendPartiesCity(p.city);
   });
+  // ----- Recreation -----
+  const recBusy = () => p.room !== 'street' || p.trip || p.drive || jailLeft(p);
+  socket.on('recOpen', () => { if (allow(p.socialTimes, 20, 10000)) sendRec(p); });
+  socket.on('recStart', (req) => {
+    if (!allow(p.socialTimes, 20, 10000)) return;
+    const kind = req && req.kind;
+    if (!REC.isSpot(kind)) return;
+    if (p.rec) return notice(p, 'Finish or stop what you are doing first.');
+    if (recBusy()) return notice(p, 'Go out on the street (on foot) to use a fun spot.');
+    if (!recSpot(p, kind)) return notice(p, `Walk up to the ${REC.SPOTS[kind].title.toLowerCase()} first. Use "Show me where".`);
+    const fee = REC.SPOTS[kind].fee;
+    if (kind === 'football') { const w = Math.ceil(((p.recFb || 0) + REC.KICK_COOLDOWN_MS - Date.now()) / 1000); if (w > 0) return notice(p, `The keeper needs a break. Again in ${w} s.`); }
+    if (kind !== 'fish' && p.cash < fee) return notice(p, `That costs ₦${fee.toLocaleString('en-NG')}.`);
+    const now = Date.now();
+    const base = { kind, city: p.city };
+    if (kind !== 'fish') p.cash -= fee;
+    if (kind === 'swim') p.rec = { ...base, endsAt: now + REC.SWIM_MS, total: REC.SWIM_MS };
+    else if (kind === 'cinema') p.rec = { ...base, endsAt: now + REC.CINEMA_MS, total: REC.CINEMA_MS };
+    else if (kind === 'fish') p.rec = { ...base, state: 'idle', catches: 0, earned: 0, last: '' };
+    else if (kind === 'dance') p.rec = { ...base, t0: now + 400, taps: [], lastTap: 0 };
+    else if (kind === 'football') p.rec = { ...base, left: REC.KICKS, goals: 0, last: '' };
+    sendRec(p);
+  });
+  socket.on('recCast', () => {
+    const r = p.rec;
+    if (!r || r.kind !== 'fish' || r.state !== 'idle' || !allow(p.socialTimes, 30, 10000)) return;
+    const fee = REC.SPOTS.fish.fee;
+    if (p.cash < fee) return notice(p, `Bait costs ₦${fee.toLocaleString('en-NG')}.`);
+    p.cash -= fee;
+    r.state = 'wait'; r.castAt = Date.now(); r.biteAt = REC.biteIn(Math.random); r.last = '';
+    sendRec(p);
+  });
+  socket.on('recReel', () => {
+    const r = p.rec;
+    if (!r || r.kind !== 'fish' || (r.state !== 'wait' && r.state !== 'bite')) return;
+    const res = REC.reel(Date.now() - r.castAt, r.biteAt);
+    r.state = 'idle';
+    if (res === 'early') r.last = 'Too early! You scared the fish away.';
+    else if (res === 'late') r.last = 'Too slow. It got away.';
+    else {
+      const f = REC.rollFish(Math.random);
+      const got = recPay(p, f.value);
+      r.catches++; r.earned += got;
+      r.last = got < f.value ? `You caught a ${f.name} worth ₦${f.value.toLocaleString('en-NG')}, but the market only took ₦${got.toLocaleString('en-NG')} this hour.` : `You caught a ${f.name}! Sold for ₦${got.toLocaleString('en-NG')}.`;
+      recNeed(p, { fun: 6 });
+      progGain(p, 'fish'); progGain(p, 'xp', f.xp);
+      if (r.catches % 3 === 1) progGain(p, 'rec');
+      save(p);
+    }
+    sendRec(p);
+  });
+  socket.on('recTap', () => {
+    const r = p.rec;
+    if (!r || r.kind !== 'dance') return;
+    const now = Date.now();
+    if (now - r.lastTap < REC.TAP_GAP_MS || r.taps.length >= 24) return;
+    r.lastTap = now;
+    r.taps.push(now - r.t0);
+  });
+  socket.on('recKick', (dir) => {
+    const r = p.rec;
+    if (!r || r.kind !== 'football' || r.left <= 0 || !REC.isDir(dir) || !allow(p.socialTimes, 30, 10000)) return;
+    const k = REC.kick(dir, Math.random);
+    r.left--;
+    recNeed(p, REC.kickFx);
+    let got = 0;
+    if (k.goal) { r.goals++; got = recPay(p, REC.GOAL_PAY); progGain(p, 'goal'); }
+    r.last = k.wide ? 'Wide! Off the post.' : k.goal ? `GOAL!${got ? ` +₦${got.toLocaleString('en-NG')}` : ''}` : 'Saved by the keeper.';
+    p.socket.emit('recKickResult', { dir, keeper: k.keeper, wide: k.wide, goal: k.goal });
+    if (r.left <= 0) {
+      p.recFb = Date.now();
+      progGain(p, 'rec'); progGain(p, 'xp', 10 + r.goals * 5);
+      notice(p, `⚽ Full time: ${r.goals} goal${r.goals === 1 ? '' : 's'} from ${REC.KICKS} kicks.`);
+      save(p);
+      p.rec = null;
+    }
+    sendRec(p);
+  });
+  socket.on('recStop', () => { if (p.rec) recEnd(p, p.rec.kind === 'fish' ? `You packed up. ${p.rec.catches} fish caught, ₦${p.rec.earned.toLocaleString('en-NG')} earned.` : 'You stopped. No refund for the fee.'); });
+  if (process.env.REC_TEST) socket.on('recTp', (i) => { const t = spotsOf(p.city)[Number(i) || 0]; if (t) { p.x = p.tx = t.x; p.z = p.tz = t.z; } });
   socket.on('partyEnd', () => { const x = PARTIES.get(p.userId); if (x) { x.endsAt = 0; } });
   socket.on('boardsOpen', () => { if (allow(p.socialTimes, 6, 10000)) p.socket.emit('boards', boardsFor(p)); });
   socket.on('voiceOn', (on) => {
@@ -3575,8 +3757,9 @@ io.on('connection', (socket) => {
   socket.on('garageBuild', () => {
     if (!allow(p.socialTimes, 12, 10000)) return;
     if (p.garage.g) return notice(p, 'You already have a garage.');
-    if (p.cash < GARAGE_COST) return notice(p, `A private garage costs ₦${GARAGE_COST.toLocaleString('en-NG')}.`);
-    p.cash -= GARAGE_COST; p.garage.g = true;
+    const cost = ownsHouse(p.userId) ? 0 : GARAGE_COST;
+    if (p.cash < cost) return notice(p, `A private garage costs ₦${GARAGE_COST.toLocaleString('en-NG')} (free if you own a built house).`);
+    p.cash -= cost; p.garage.g = true;
     notice(p, `Your private garage is built. It holds ${GARAGE_SLOTS} vehicles. Park next to your front door.`);
     save(p); sendGarage(p);
   });
@@ -3732,7 +3915,7 @@ io.on('connection', (socket) => {
     const out = [];
     for (const c of CITY_IDS) for (const [id, rec] of LOTS[c]) {
       if (!rec.ask || rec.owner === p.userId || rec.lease) continue;
-      out.push({ city: c, cityName: CITIES[c].name, id, seller: rec.ownerName, ask: rec.ask, kind: rec.biz ? rec.biz.kind : null, name: rec.biz ? rec.biz.name : null, level: rec.biz ? rec.biz.level : 0, auto: Boolean(rec.biz && isAuto(rec.biz)) });
+      out.push({ city: c, cityName: CITIES[c].name, id, seller: rec.ownerName, ask: rec.ask, kind: rec.biz ? rec.biz.kind : (rec.house && rec.house.cfg ? 'house' : null), name: rec.biz ? rec.biz.name : (rec.house && rec.house.cfg ? 'House' : null), level: rec.biz ? rec.biz.level : 0, auto: Boolean(rec.biz && isAuto(rec.biz)) });
     }
     out.sort((a, b) => a.ask - b.ask);
     socket.emit('market', { list: out.slice(0, 60), owned: LOTS_OWNED(p), max: MAX_LOTS });
@@ -3747,7 +3930,7 @@ io.on('connection', (socket) => {
     if (p.cash < rec.ask) return notice(p, `That lot costs ₦${rec.ask.toLocaleString('en-US')}.`);
     const price = rec.ask, seller = rec.owner, what = rec.biz ? rec.biz.name : 'a lot';
     p.cash -= price;
-    rec.owner = p.userId; rec.ownerName = p.name; rec.ask = 0; rec.rentAsk = 0;
+    rec.owner = p.userId; rec.ownerName = p.name; rec.ask = 0; rec.rentAsk = 0; if (rec.house) { rec.house.draft = null; rec.house.open = false; }
     for (const o of [...players.values()]) if (o.room === 'biz' && o.city === req.city && o.bizLot === req.id && o.userId !== p.userId) { const l = CITY_CTX[req.city].layout.lots[req.id]; moveNow(o, 'street', l.door.x, l.door.z, req.city); notice(o, 'The business changed hands. You were shown out.'); }
     saveLot(req.city, req.id);
     payUser(seller, marketNet(price), `${p.name} bought ${what} for ₦${price.toLocaleString('en-US')}. You received ₦${marketNet(price).toLocaleString('en-US')}.`);
@@ -3755,6 +3938,89 @@ io.on('connection', (socket) => {
     broadcastLots(req.city);
     sendProps();
     socket.emit('marketDone');
+  });
+
+  // ----- House building (rules in house.js). Owner of an empty lot designs a house, then builds it for the total cost. -----
+  const houseLots = () => {
+    const out = [];
+    for (const c of CITY_IDS) for (const [id, rec] of LOTS[c]) {
+      if (rec.owner !== p.userId) continue;
+      const l = CITY_CTX[c].layout.lots[id];
+      const mc = HS.maxCells(l);
+      const built = rec.house && rec.house.cfg ? rec.house.cfg : null;
+      out.push({ city: c, cityName: CITIES[c].name, id, lotW: l.w, lotD: l.d, max: mc, hasBiz: Boolean(rec.biz), leased: Boolean(rec.lease), built, draft: rec.house ? rec.house.draft : null, open: Boolean(rec.house && rec.house.open), cost: built ? HS.costOf(built) : null });
+    }
+    return out;
+  };
+  const sendHouses = () => socket.emit('houses', {
+    lots: houseLots(),
+    presets: HS.PRESET_IDS.map((k) => ({ id: k, label: HS.PRESETS[k].label, text: HS.PRESETS[k].text, cfg: HS.presetCfg(k), cost: HS.costOf(HS.presetCfg(k)).total })),
+    catalog: { furn: HS.FURN, foundations: HS.FOUNDATIONS, roofs: HS.ROOFS, floors: HS.FLOORS, prices: HS.PRICES, limits: HS.LIMITS, refund: HS.REFUND_SHARE },
+  });
+  const houseRec = (req) => { const rec = req && typeof req === 'object' && CITY_CTX[req.city] ? LOTS[req.city].get(req.id) : null; return rec && rec.owner === p.userId ? rec : null; };
+  socket.on('houseOpen', () => { if (allow(p.socialTimes, 12, 10000)) sendHouses(); });
+  socket.on('houseSave', (req) => {   // saving a design is free and may be unfinished
+    const rec = houseRec(req);
+    if (!rec) return notice(p, 'That is not your lot.');
+    if (rec.biz) return notice(p, 'There is a business on this lot.');
+    if (!allow(p.socialTimes, 20, 10000)) return;
+    const cfg = HS.sanitize(req.cfg);
+    if (!cfg) return notice(p, 'That design could not be saved.');
+    rec.house = { s: rec.house && rec.house.cfg ? 'built' : 'draft', cfg: rec.house ? rec.house.cfg : null, draft: cfg, open: Boolean(rec.house && rec.house.open) };
+    saveLot(req.city, req.id);
+    sendHouses();
+  });
+  socket.on('houseCheck', (req) => {   // live check while designing: is the plan allowed, what does it cost, what would the renovation charge be
+    const rec = houseRec(req);
+    if (!rec || !allow(p.socialTimes, 60, 10000)) return;
+    const l = CITY_CTX[req.city].layout.lots[req.id];
+    const mc = HS.maxCells(l);
+    const v = HS.validate(req.cfg, mc.w, mc.d);
+    const old = rec.house && rec.house.cfg ? HS.costOf(rec.house.cfg).total : 0;
+    socket.emit('houseChecked', { city: req.city, id: req.id, ok: v.ok, why: v.why || '', cost: v.cfg ? HS.costOf(v.cfg) : null, charge: v.ok ? HS.renovationCharge(old, v.cost.total) : 0, old });
+  });
+  socket.on('houseBuild', (req) => {
+    const rec = houseRec(req);
+    if (!rec) return notice(p, 'That is not your lot.');
+    if (rec.biz) return notice(p, 'There is a business on this lot.');
+    if (rec.lease) return notice(p, 'This lot is leased out.');
+    if (!allow(p.socialTimes, 12, 10000)) return;
+    const l = CITY_CTX[req.city].layout.lots[req.id];
+    const mc = HS.maxCells(l);
+    const v = HS.validate(req.cfg, mc.w, mc.d);
+    if (!v.ok) return notice(p, v.why);
+    const old = rec.house && rec.house.cfg ? HS.costOf(rec.house.cfg).total : 0;
+    const charge = HS.renovationCharge(old, v.cost.total);
+    if (charge > 0 && p.cash < charge) return notice(p, `That costs ₦${charge.toLocaleString('en-NG')}${old ? ' more' : ''}. You have ₦${Math.round(p.cash).toLocaleString('en-NG')}.`);
+    p.cash -= charge;           // a negative charge is a refund
+    const wasNew = !old;
+    rec.house = { s: 'built', cfg: v.cfg, draft: null, open: Boolean(rec.house && rec.house.open) };
+    saveLot(req.city, req.id);
+    for (const o of [...players.values()]) if (o.room === 'biz' && o.city === req.city && o.bizLot === req.id) { if (o.userId !== p.userId) notice(o, 'The house was rebuilt.'); moveNow(o, 'biz', 0, 8); }
+    notice(p, charge > 0 ? `${wasNew ? 'Your house is built' : 'Renovation done'}. You paid ₦${charge.toLocaleString('en-NG')}.` : `Renovation done. You got ₦${(-charge).toLocaleString('en-NG')} back for what you removed.`);
+    if (wasNew) progGain(p, 'house', 1);
+    broadcastLots(req.city);
+    sendHouses(); save(p);
+  });
+  socket.on('houseAccess', (req) => {
+    const rec = houseRec(req);
+    if (!rec || !rec.house || !rec.house.cfg) return;
+    rec.house.open = Boolean(req.open);
+    saveLot(req.city, req.id);
+    notice(p, rec.house.open ? 'Anyone can visit your house now.' : 'Only friends can visit your house now.');
+    sendHouses();
+  });
+  socket.on('houseDemolish', (req) => {
+    const rec = houseRec(req);
+    if (!rec || !rec.house || !rec.house.cfg) return notice(p, 'There is no house to demolish.');
+    const back = Math.round(HS.houseValue(rec.house.cfg) * HS.REFUND_SHARE);
+    for (const o of [...players.values()]) if (o.room === 'biz' && o.city === req.city && o.bizLot === req.id) { const l = CITY_CTX[req.city].layout.lots[req.id]; moveNow(o, 'street', l.door.x, l.door.z, req.city); notice(o, 'The house was demolished. You were shown out.'); }
+    rec.house = rec.house.draft ? { s: 'draft', cfg: null, draft: rec.house.draft, open: false } : null;
+    p.cash += back;
+    saveLot(req.city, req.id);
+    notice(p, `House demolished. You got ₦${back.toLocaleString('en-NG')} back.`);
+    broadcastLots(req.city);
+    sendHouses(); save(p);
   });
 
   // ----- Renting businesses to other players -----
@@ -4355,6 +4621,42 @@ io.on('connection', (socket) => {
     if (!dest.solo && occupancy(id, p.city) >= dest.cap) return notice(p, `${dest.name} is full right now.`);
     moveNow(p, id, 0, 8);
   });
+  // The Real map: a big open walkable area for cities that have a map file. Reached from the phone app, left the same way.
+  socket.on('districtGo', () => {
+    if (p.room !== 'street' || p.trip || p.drive || p.shift || p.riding || p.auto) return notice(p, 'Get out on the street on foot first.');
+    if (jailLeft(p)) return notice(p, `You are being held for ${jailLeft(p)} more seconds.`);
+    const m = MAPS.get(p.city);
+    if (!m) return notice(p, 'This city has no real map yet.');
+    if (occupancy('district', p.city) >= ROOMS.district.cap) return notice(p, 'The real map is full right now.');
+    p.districtBack = { x: p.x, z: p.z, city: p.city };
+    moveNow(p, 'district', m.spawn.x, m.spawn.z);
+  });
+  // Walk into a real place: it becomes one of the game's own buildings (a bank, a hotel, a hospital...). Leaving puts you back at its door.
+  socket.on('districtEnter', (i) => {
+    if (p.room !== 'district' || p.trip || !Number.isInteger(i)) return;
+    if (jailLeft(p)) return;
+    const m = MAPS.get(p.city);
+    const q = m && m.pois[i];
+    if (!q || !q.room || !ROOMS[q.room] || ROOMS[q.room].hidden) return;
+    if (Math.hypot(p.x - q.x, p.z - q.z) > MAPS.ENTER_REACH) return notice(p, 'Walk up to the door first.');
+    if (!venueOpen(q.room)) return notice(p, closedText(q.room));
+    if (!ROOMS[q.room].solo && occupancy(q.room, p.city) >= ROOMS[q.room].cap) return notice(p, `${q.n} is full right now.`);
+    p.fromDistrict = { x: q.x, z: q.z, city: p.city };
+    moveNow(p, q.room, 0, 8);
+  });
+  socket.on('districtLeave', () => {
+    if (p.room !== 'district' || p.trip) return;
+    const b = p.districtBack && p.districtBack.city === p.city ? p.districtBack : null;
+    moveNow(p, 'street', b ? b.x : CITY.spawn.x, b ? b.z : CITY.spawn.z);
+  });
+  socket.on('districtTp', (i) => {
+    if (p.room !== 'district' || p.trip || !Number.isInteger(i)) return;
+    const m = MAPS.get(p.city);
+    const q = m && m.pois[i];
+    if (!q) return;
+    p.x = p.tx = q.x; p.z = p.tz = q.z; p.path = null; p.auto = null;
+    notice(p, `You are at ${q.n}.`);
+  });
   socket.on('goOutside', () => {
     if (p.room === 'biz' && !p.trip) {
       if (Math.hypot(p.x - INSIDE_EXIT.x, p.z - 8.5) > DOOR_REACH) return notice(p, 'Walk up to the door first.');
@@ -4368,6 +4670,7 @@ io.on('connection', (socket) => {
     if (p.trip || !p.room || !isVenueDoor(p.room)) return;
     if (jailLeft(p)) return notice(p, `You are being held for ${jailLeft(p)} more seconds.`);
     if (Math.hypot(p.x - INSIDE_EXIT.x, p.z - 8.5) > DOOR_REACH) return notice(p, 'Walk up to the door first.');
+    if (backToDistrict(p)) return;
     const d = doorFor(p, p.room);
     if (!d) return;
     moveNow(p, 'street', d.x, d.z);
@@ -4772,7 +5075,7 @@ setInterval(() => {
     if (d > 0.01) {
       if (d > 0.3) p.face = Math.atan2(dx, dz); // remembered so a car starts pointing the way you were walking
       const street = p.room === 'street';
-      const speed = speedFor(street, p.run) * (p.energy < 20 ? 0.6 : 1); // very tired players walk slower
+      const speed = speedFor(street || p.room === 'district', p.run) * (p.energy < 20 ? 0.6 : 1); // very tired players walk slower
       const step = Math.min(d, speed * dt);
       if (street) {
         const cx = ctxOf(p);
@@ -4780,6 +5083,10 @@ setInterval(() => {
         const m = slide((x, z) => cx.walls.blocked(x, z), p.x, p.z, (dx / d) * step, (dz / d) * step);
         // Cars are solid too: you cannot walk into one (unless you are already inside it, so you can get out).
         if (!cx.traffic.blocked(m.x, m.z) || cx.traffic.blocked(p.x, p.z)) { p.x = m.x; p.z = m.z; }
+      } else if (p.room === 'district') {
+        const dm = MAPS.get(p.city);
+        const m = slide(dm ? dm.blocked : () => false, p.x, p.z, (dx / d) * step, (dz / d) * step);
+        p.x = m.x; p.z = m.z;
       } else if (roomSolids(p.room).length || p.room === HOME || p.room === 'friendhome') {
         const m = slide(roomBlockedFn(p.room, extraSolids(p)), p.x, p.z, (dx / d) * step, (dz / d) * step);
         p.x = m.x; p.z = m.z;
@@ -4923,8 +5230,9 @@ setInterval(() => {
   const now = Date.now();
   const realMs = Math.min(now - world.lastTick, 5000); // a long pause (laptop asleep) never jumps the world ahead
   world.lastTick = now;
-  const dtMin = gameMinutesFor(realMs, CLOCK_SPEED);
-  world.gameMin += dtMin;
+  const adv = advanceClock(world.gameMin, realMs, CLOCK_SPEED);
+  const dtMin = adv.dtMin;
+  world.gameMin = adv.gameMin;
 
   // City events.
   if (world.event && now >= world.event.endsAt) endEvent();

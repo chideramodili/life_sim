@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { loadCar, carClone } from './vehicles.js';
 import { whenNpcReady, upgradeToNpc, moveNpc } from './npc.js';
+import { buildHouse } from './houseBuild.js';
 
 const rnd = (seed) => {
   let s = seed >>> 0;
@@ -687,6 +688,22 @@ export function createInterior(scene) {
       const people = new THREE.Group();
       root.add(people);
       if (roomId !== 'home') addFigures(people, theme, roomId, bizStaff);
+    },
+    // A player-built house: floor, walls (cut away low towards the camera), furniture, and a yard around it.
+    showHouse(cfg) {
+      const key = 'house:' + JSON.stringify(cfg);
+      if (current === key) return;
+      clear();
+      current = key;
+      root.visible = true;
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: '#4f7a3a', roughness: 1 }));
+      ground.rotation.x = -Math.PI / 2; ground.position.y = -0.03; root.add(ground);
+      owned.push(ground.geometry, ground.material);
+      const yard = new THREE.Mesh(new THREE.PlaneGeometry(20, 20), new THREE.MeshStandardMaterial({ color: '#8a8478', roughness: 1 }));
+      yard.rotation.x = -Math.PI / 2; yard.position.y = -0.02; root.add(yard);
+      owned.push(yard.geometry, yard.material);
+      root.add(buildHouse(cfg, { inside: true }));
+      propsGroup = null; solids = [];
     },
     // Closing time: customers (not staff) head for the door and leave.
     closeUp() { roomOpenForVisits = false; for (const f of figures) { if (!f.target) continue; if (f.kind === 'away') f.kind = 'gone'; else if (['wander', 'idle', 'exit', 'enter'].includes(f.kind)) f.kind = 'leave'; } },

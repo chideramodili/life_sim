@@ -122,7 +122,7 @@ export function initBiz(socket) {
       tick = now;
       let near = -1;
       const inside = Boolean(roomInfo && roomInfo.id === 'biz' && Number.isInteger(roomInfo.bizLot));
-      if (inside && !busy) near = roomInfo.bizLot;
+      if (inside && !busy) near = roomInfo.house ? -1 : roomInfo.bizLot;
       else if (pos && roomInfo && roomInfo.city && roomInfo.city.lots && !busy) {
         let best = 5;
         for (const l of roomInfo.city.lots) { const d = Math.hypot(pos.x - l.door.x, pos.z - l.door.z); if (d < best) { best = d; near = l.id; } }

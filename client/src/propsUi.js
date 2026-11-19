@@ -4,7 +4,7 @@ import { hideOtherPanels } from './panels.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
 const naira = (n) => '₦' + Math.round(n).toLocaleString('en-NG');
-const KIND = { cafe: '☕', minimart: '🛒', salon: '💈', gym: '🏋️' };
+const KIND = { cafe: '☕', minimart: '🛒', salon: '💈', gym: '🏋️', house: '🏠' };
 
 export function initProps(socket) {
   const btn = el('button'); btn.id = 'propsBtn'; btn.hidden = true; btn.textContent = 'Properties';

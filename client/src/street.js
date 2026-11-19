@@ -1,6 +1,7 @@
 // Adulthood: the city. Roads, sidewalks, blocks, buildings with doors, parks, trees, street lights, bus stops, railway, traffic, and people.
 // The server sends the layout (server/city.js). This file only draws it. Everything is made from code (no model files),
 // and every repeated thing is merged or instanced so phones can draw the whole city.
+import { buildHouse } from './houseBuild.js';
 import * as THREE from 'three';
 import { iconOf } from './mapUi.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -929,6 +930,13 @@ export function createCity(info) {
           const awn = new THREE.Mesh(new THREE.BoxGeometry(Math.min(10, l.w - 3) + 0.6, 0.25, 2), new THREE.MeshStandardMaterial({ color: col }));
           awn.position.set(l.x, 3, l.z + sgn * 1.4); grp.add(awn);
           grp.add(sign((st.soldOut ? `${st.name} · sold out` : st.name) + (st.level >= 4 ? ' ★' : '') + (st.ask ? ' · for sale' : ''), col, l.x, 5.6 + Math.min(st.level || 1, 3) * 0.5, l.z));
+        } else if (st.house) {
+          const hh = buildHouse(st.house, { roof: true });
+          const hg = new THREE.Group(); hg.add(hh);
+          hg.position.set(l.x, 0, l.z + sgn * (l.d / 2 - 1.5 - 9.5));   // the front of the house sits 1.5 m behind the street edge of the plot
+          if (l.f === 'n') hg.rotation.y = Math.PI;
+          grp.add(hg);
+          grp.add(sign(`${String(st.owner || '').slice(0, 12)}'s house`, '#c9a227', l.x, 4.6, l.z + sgn * (l.d / 2 - 1.5)));
         } else if (st.owner) {
           grp.add(sign(st.ask ? `${String(st.owner).slice(0, 12)}'s lot · for sale ₦${Math.round(st.ask / 1000)}k` : `${String(st.owner).slice(0, 12)}'s lot`, st.ask ? '#4ca3ff' : '#8a8f98', l.x, 3.2, l.z));
         } else {

@@ -51,6 +51,7 @@ export const MISSIONS = [
   { id: 'd_trip', scope: 'd', text: 'Take a trip across town', ev: 'trip', goal: 1, cash: 1500, xp: 15 },
   { id: 'd_drive', scope: 'd', text: 'Drive for 10 minutes', ev: 'drive', goal: 10, cash: 3000, xp: 30 },
   { id: 'd_manage', scope: 'd', text: 'Do 2 management tasks in your business', ev: 'manage', goal: 2, cash: 5000, xp: 30 },
+  { id: 'd_fun', scope: 'd', text: 'Have fun: do 2 recreation activities', ev: 'rec', goal: 2, cash: 2000, xp: 20 },
   { id: 'd_taxi', scope: 'd', text: 'Complete 2 taxi fares', ev: 'fare', goal: 2, cash: 5000, xp: 30 },
   { id: 'd_deliver', scope: 'd', text: 'Complete a delivery', ev: 'delivery', goal: 1, cash: 4000, xp: 30 },
   { id: 'd_talk', scope: 'd', text: 'Chat with 2 different friends', ev: 'talk', goal: 2, cash: 2500, xp: 25 },
@@ -67,6 +68,7 @@ export const MISSIONS = [
   { id: 'w_manage', scope: 'w', text: 'Hands-on owner: do 12 management tasks', ev: 'manage', goal: 12, cash: 30000, xp: 200 },
   { id: 'w_taxi', scope: 'w', text: 'Taxi hustle: complete 10 fares', ev: 'fare', goal: 10, cash: 30000, xp: 220 },
   { id: 'w_deliver', scope: 'w', text: 'Entrepreneur: complete 8 deliveries', ev: 'delivery', goal: 8, cash: 25000, xp: 200 },
+  { id: 'w_fun', scope: 'w', text: 'Fun week: do 8 recreation activities', ev: 'rec', goal: 8, cash: 12000, xp: 120 },
   { id: 'w_talk', scope: 'w', text: 'Chat with 5 different friends', ev: 'talk', goal: 5, cash: 10000, xp: 100 },
 ];
 const MISSION = Object.fromEntries(MISSIONS.map((m) => [m.id, m]));
@@ -108,6 +110,10 @@ export const ACHIEVEMENTS = [
   { id: 'a_fare50', name: 'Taxi Pro', text: 'Complete 50 taxi fares.', goal: 50, val: (P) => P.st.fares || 0, cash: 80000, xp: 300 },
   { id: 'a_fare200', name: 'City Legend', text: 'Complete 200 taxi fares.', goal: 200, val: (P) => P.st.fares || 0, cash: 300000, xp: 800 },
   { id: 'a_landlord', name: 'Landlord', text: 'Rent your business out 3 times.', goal: 3, val: (P) => P.st.leases || 0, cash: 40000, xp: 200 },
+  { id: 'a_builder', name: 'Home Builder', text: 'Design and build your own house.', goal: 1, val: (P) => P.st.houses || 0, cash: 30000, xp: 300 },
+  { id: 'a_angler', name: 'Angler', text: 'Catch 15 fish.', goal: 15, val: (P) => P.st.fish || 0, cash: 15000, xp: 120 },
+  { id: 'a_striker', name: 'Striker', text: 'Score 20 penalty goals.', goal: 20, val: (P) => P.st.goals || 0, cash: 15000, xp: 120 },
+  { id: 'a_dancer', name: 'Dancer', text: 'Hit 5 or more beats in 5 dances.', goal: 5, val: (P) => P.st.dances || 0, cash: 15000, xp: 120 },
   { id: 'a_party5', name: 'Party Animal', text: 'Join or host 5 parties.', goal: 5, val: (P) => P.st.party || 0, cash: 30000, xp: 150 },
   { id: 'a_host3', name: 'Event Host', text: 'Host 3 parties.', goal: 3, val: (P) => P.st.host || 0, cash: 40000, xp: 200 },
   { id: 'a_upg1', name: 'Gearhead', text: 'Fit your first vehicle upgrade.', goal: 1, val: (P) => P.st.upg || 0, cash: 5000, xp: 40 },
@@ -132,7 +138,7 @@ export const ACHIEVEMENTS = [
 ];
 
 // ---------- State ----------
-const STATS = ['shifts', 'earned', 'spent', 'buys', 'sent', 'chat', 'knocks', 'acts', 'trips', 'saved', 'deliv', 'delM', 'fares', 'taxiM', 'rateSum', 'rateN', 'chests', 'rallies', 'mgmt', 'loves', 'dates', 'wed', 'party', 'host', 'upg', 'races', 'raceWins', 'podiums', 'raceWon', 'leases', 'rents'];
+const STATS = ['shifts', 'earned', 'spent', 'buys', 'sent', 'chat', 'knocks', 'acts', 'trips', 'saved', 'deliv', 'delM', 'fares', 'taxiM', 'rateSum', 'rateN', 'chests', 'rallies', 'mgmt', 'loves', 'dates', 'wed', 'party', 'host', 'upg', 'races', 'raceWins', 'podiums', 'raceWon', 'leases', 'rents', 'recs', 'fish', 'goals', 'dances', 'houses'];
 export const defaultProg = () => ({ xp: 0, tok: 0, wins: 0, lv: 1, st: Object.fromEntries(STATS.map((k) => [k, 0])), pl: [], bd: [], ach: {}, dk: '', d: null, wk: '', w: null });
 const num = (v, lo, hi, d) => (Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : d);
 function parseSet(raw, scope) {
@@ -257,6 +263,12 @@ export function record(prog, ev, n, now, seedName, key) {
     else if (ev === 'wed') { st.wed += n; prog.xp += 200 * n; }
     else if (ev === 'party') { st.party += n; prog.xp += 15 * n; }
     else if (ev === 'host') { st.host += n; prog.xp += 25 * n; }
+    else if (ev === 'xp') prog.xp += n;
+    else if (ev === 'house') { st.houses += n; prog.xp += 150 * n; }
+    else if (ev === 'rec') { st.recs += n; prog.xp += 8 * n; }
+    else if (ev === 'fish') { st.fish += n; }
+    else if (ev === 'goal') { st.goals += n; }
+    else if (ev === 'dance') { st.dances += n; }
     else if (ev === 'lease') { st.leases += n; prog.xp += 40 * n; }
     else if (ev === 'rent') { st.rents += n; prog.xp += 30 * n; }
     else if (ev === 'upgrade') { st.upg += n; prog.xp += 20 * n; }
