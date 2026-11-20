@@ -22,6 +22,8 @@ import { planFor, stepWork } from './workstyle.js';
 import { restoreBackup, startBackups, finalBackup } from './backup.js';
 import { speedFor, slide, findPath, roomBlockedFn, roomSolids } from './movement.js';
 import * as MAPS from './district.js';
+import * as REAL from './realcity.js';
+import { createRealTraffic } from './realtraffic.js';
 import { MOVE_FEE, CITIES, CITY_IDS, DEFAULT_CITY, isCity, parseCity, TICKETS, TICKET_IDS, ticketQuote, distanceBetween, HIGHWAY, neighbour, gateAt, arrivalFrom, placeName } from './cities.js';
 import { landMult, lotPrice, SELL_TO_GAME, BUILDING_BACK, MARKET_FEE, isAsk, marketNet } from './land.js';
 import { MAX_LOTS, SELL_LAND, BIZ_MAX_LEVEL, isAuto, autoStep as bizAutoStep, buildingValue, UPGRADE_COST, STOCK_CAP, KINDS, KIND_IDS, isKind, priceOf, validName, isOpen as bizOpenNow, newBiz, step as bizStep, buyStock, payStaff, hire as bizHire, doDuty, DUTIES, DUTY_IDS, dutyLeft, STAFF_WAGE, STAFF_MAX, STAFF_BOOST, HIRE_FEE } from './business.js';
@@ -146,14 +148,25 @@ const HOME = 'home';
 // How far a player can walk in each room. Interiors are 20x20. The city is big (see city.js) and has solid buildings.
 // Every city is its own map with its own buildings, walls and traffic (see cities.js). Lagos is the first one.
 const CITY_CTX = {};
+const noTraffic = { cars: [], parked: [], bays: [], lanes: [], step: () => [], blocked: () => false, view: () => [], setLevel() {}, carAhead: () => null, copCars: () => [], HIT_MIN: 2.5 };
 for (const id of CITY_IDS) {
+  // A city with real map tiles is the real city; otherwise the old generated one
+  const realLay = process.env.OLD_CITY === '1' ? null : REAL.layoutFor(id, CITIES[id].seed);
+  if (realLay) { const hub = REAL.get(id); CITY_CTX[id] = { id, def: CITIES[id], real: true, half: hub.half, layout: realLay, walls: { blocked: hub.blocked }, checkpoints: [], traffic: createRealTraffic(hub, CITIES[id].seed) }; continue; }
   const g = getCity(CITIES[id].seed);
   CITY_CTX[id] = { id, def: CITIES[id], layout: g.city, walls: g.walls, checkpoints: checkpointsOf(g.city), traffic: createTraffic(g.city, g.walls.blocked, { brake: process.env.TRAFFIC_NO_BRAKE !== '1' }) };
 }
 const LAGOS = CITY_CTX[DEFAULT_CITY];
 const ctxOf = (p) => CITY_CTX[p.city] || LAGOS;
 const CITY_LAYOUT = LAGOS.layout; // houses and homes are in Lagos for now
-const boundsOf = (id) => (id === 'street' ? { bx: CITY.bx, bz: CITY.bz } : id === 'district' ? { bx: MAPS.HALF, bz: MAPS.HALF } : { bx: BOUNDS, bz: BOUNDS });
+const boundsOf = (id, city) => (id === 'street' ? (city && CITY_CTX[city] && CITY_CTX[city].real ? { bx: CITY_CTX[city].half - 2, bz: CITY_CTX[city].half - 2 } : { bx: CITY.bx, bz: CITY.bz }) : id === 'district' ? { bx: MAPS.HALF, bz: MAPS.HALF } : { bx: BOUNDS, bz: BOUNDS });
+// Tap-to-walk paths: the old street is searched whole; a real city is far too big, so search a box around the trip.
+const pathBox = (p, b, street, tx, tz, cell = 1) => {
+  if (street && ctxOf(p).real) { const h = Math.min(260, Math.max(60, Math.hypot(tx - p.x, tz - p.z) / 2 + 50)); return { bx: h, bz: h, ox: (p.x + tx) / 2, oz: (p.z + tz) / 2, cell, limit: 40000 }; }
+  return street ? { bx: b.bx, bz: b.bz, cell: 1 } : { bx: b.bx, bz: b.bz, cell: 0.5 };
+};
+// Where you appear on the street when nothing says otherwise: the old city's start, or the front of the real city's Plaza
+const spawnOf = (cityId) => { const c = CITY_CTX[cityId] || LAGOS; if (!c.real || process.env.CITY_SPAWN) return CITY.spawn; const d = c.layout.doors.plaza || c.layout.doors.shop || { x: 0, z: 0 }; return { x: d.x, z: d.z + 1.5 }; };
 const CITY_SPEED = 1.7;          // outdoors you walk briskly, because the city is big
 const INSIDE_EXIT = { x: 0, z: 9.5 }; // the door out of every building, on its south wall
 // Plots: every player has a house on a plot in a residential area. (With more players than plots, two players share the same spot. Homes are still private.)
@@ -959,12 +972,13 @@ const spaceOf = (p) => (p.room === 'friendhome' ? `home:${p.visiting}` : p.room 
 
 function roomInfo(id, p = null) {
   const r = ROOMS[id];
-  const b = boundsOf(id);
+  const b = boundsOf(id, p ? p.city : null);
   const info = { id, name: placeName(p ? p.city : DEFAULT_CITY, id, r.name), color: r.color, accent: r.accent, bounds: b.bx, bx: b.bx, bz: b.bz, solo: Boolean(r.solo) };
   const ctx = p ? ctxOf(p) : LAGOS;
   if (r.outdoor) {
     // The layout is the same for everyone in a city. The only thing that is yours is your own plot (in Lagos).
     info.city = ctx.layout;
+    info.real = Boolean(ctx.real);
     info.cityId = ctx.id;
     info.cityName = ctx.def.name;
     info.theme = ctx.def.theme;
@@ -2083,11 +2097,11 @@ const FX_REACH = { bed: 2.1, tub: 2.7, toilet: 1.7 }, FX_MS = { bed: 5000, tub: 
 function goSit(p, x, z, f, fx = null) {
   p.sitTo = { x, z, f: Number.isFinite(f) ? Math.round((((f % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) * 100) / 100 : null, fx, reach: fx ? FX_REACH[fx] : 1.5, until: Date.now() + 12000 };
   p.tx = x; p.tz = z; p.run = false; p.path = null;
-  const b = boundsOf(p.room); p.tx = clamp(p.tx, -b.bx, b.bx); p.tz = clamp(p.tz, -b.bz, b.bz);
+  const b = boundsOf(p.room, p.city); p.tx = clamp(p.tx, -b.bx, b.bx); p.tz = clamp(p.tz, -b.bz, b.bz);
   if (Math.hypot(p.tx - p.x, p.tz - p.z) > 1.2) {
     const street = p.room === 'street';
     const blocked = street ? (px, pz) => ctxOf(p).walls.blocked(px, pz) : roomBlockedFn(p.room, extraSolids(p));
-    const path = findPath(blocked, { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, street ? { bx: b.bx, bz: b.bz, cell: 1 } : { bx: b.bx, bz: b.bz, cell: 0.5 });
+    const path = findPath(blocked, { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, pathBox(p, b, street, p.tx, p.tz));
     if (path && path.length) { p.path = path; p.pathKey = `${p.tx},${p.tz}`; }
   }
 }
@@ -2122,7 +2136,7 @@ function getUp(p) {
   p.lying = false; p.bedAt = null; p.anim = null;
   p.z = p.tz = -4; // beside the bed
 }
-function moveNow(p, roomId, x = roomId === 'street' ? CITY.spawn.x : 0, z = roomId === 'street' ? CITY.spawn.z : 0, city = p.city) {
+function moveNow(p, roomId, x = roomId === 'street' ? spawnOf(p.city).x : 0, z = roomId === 'street' ? spawnOf(p.city).z : 0, city = p.city) {
   const old = spaceOf(p);
   if (old) p.socket.leave(old);
   p.room = roomId;
@@ -2152,10 +2166,12 @@ const RIDE_WAIT = { bus: 6, taxi: 3, car: 0, bike: 0 }; // seconds waiting for i
 function startRide(p, method, mode, toId) {
   const door = doorFor(p, toId);
   if (!door) return false;
-  const route = routeBetween(ctxOf(p).layout, { x: p.x, z: p.z }, door);
+  const realCity = Boolean(ctxOf(p).real);
+  // The real cities have no street grid to follow yet: the ride goes straight there (and is quicker, because the real city is big)
+  const route = realCity ? { points: [{ x: p.x, z: p.z }, { x: door.x, z: door.z }], total: Math.max(1, Math.hypot(door.x - p.x, door.z - p.z)), start: { x: p.x, z: p.z }, end: { x: door.x, z: door.z } } : routeBetween(ctxOf(p).layout, { x: p.x, z: p.z }, door);
   const slow = method === 'bike' ? 1 : (world.event && world.event.travelTime) || 1;
   const rush = method === 'bus' || method === 'taxi' ? (world.event && world.event.travelTime ? 1.5 : 1) : 1;
-  const rideSec = Math.max(4, route.total / RIDE_SPEED[method] * slow);
+  const rideSec = Math.max(4, route.total / (RIDE_SPEED[method] * (realCity ? 5 : 1)) * slow);
   const now = Date.now();
   const waitEnd = now + RIDE_WAIT[method] * rush * 1000;
   p.tx = p.x; p.tz = p.z;
@@ -2567,7 +2583,7 @@ function backToDistrict(p) {
 }
 // Out of whatever building you are in, onto the street in front of its door.
 function exitBuilding(p) {
-  if (p.room === 'biz') { const l = ctxOf(p).layout.lots[p.bizLot]; return moveNow(p, 'street', l ? l.door.x : CITY.spawn.x, l ? l.door.z : CITY.spawn.z); }
+  if (p.room === 'biz') { const l = ctxOf(p).layout.lots[p.bizLot]; return moveNow(p, 'street', l ? l.door.x : spawnOf(p.city).x, l ? l.door.z : spawnOf(p.city).z); }
   if (p.room === 'friendhome') return showOut(p);
   if (backToDistrict(p)) return;
   const d = doorFor(p, p.room);
@@ -2604,9 +2620,9 @@ function autoStep(p, now) {
   if (!p.path || now > a.repath) {
     // (re)plan the way: around buildings, trees and lamp posts
     a.repath = now + 4000;
-    const b = boundsOf('street');
+    const b = boundsOf('street', p.city);
     p.tx = door.x; p.tz = door.z; p.run = false;
-    const path = findPath((x, z) => ctxOf(p).walls.blocked(x, z), { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, { bx: b.bx, bz: b.bz, cell: 1 });
+    const path = findPath((x, z) => ctxOf(p).walls.blocked(x, z), { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, pathBox(p, b, true, p.tx, p.tz));
     if (path && path.length) { p.path = path; p.pathKey = `${p.tx},${p.tz}`; }
   }
 }
@@ -2692,7 +2708,7 @@ io.on('connection', (socket) => {
     city: homeCity,
     homeCity: myHomeCity,
     trip: null,
-    x: room === 'street' ? CITY.spawn.x : 0, z: room === 'street' ? CITY.spawn.z : 0, tx: room === 'street' ? CITY.spawn.x : 0, tz: room === 'street' ? CITY.spawn.z : 0,
+    x: room === 'street' ? spawnOf(homeCity).x : 0, z: room === 'street' ? spawnOf(homeCity).z : 0, tx: room === 'street' ? spawnOf(homeCity).x : 0, tz: room === 'street' ? spawnOf(homeCity).z : 0,
     color: COLORS[user.id % COLORS.length],
     cash: saved.cash,
     food: saved.food,
@@ -2900,7 +2916,7 @@ io.on('connection', (socket) => {
     p.lastMove = now;
     if (!t || !Number.isFinite(t.x) || !Number.isFinite(t.z)) return;
     if (p.auto) p.auto = null; // you took over
-    const b = boundsOf(p.room);
+    const b = boundsOf(p.room, p.city);
     p.tx = clamp(t.x, -b.bx, b.bx);
     p.tz = clamp(t.z, -b.bz, b.bz);
     p.run = t.r === 1 || t.r === true;
@@ -2910,7 +2926,7 @@ io.on('connection', (socket) => {
     if (!(t.d === 1 || t.d === true) && Math.hypot(p.tx - p.x, p.tz - p.z) > 1.2) {
       const street = p.room === 'street';
       const blocked = street ? (x, z) => ctxOf(p).walls.blocked(x, z) : roomBlockedFn(p.room, extraSolids(p));
-      const path = findPath(blocked, { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, street ? { bx: b.bx, bz: b.bz, cell: 1 } : { bx: b.bx, bz: b.bz, cell: 0.5 });
+      const path = findPath(blocked, { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, pathBox(p, b, street, p.tx, p.tz));
       if (path && path.length) { p.path = path; p.pathKey = `${p.tx},${p.tz}`; }
     }
   });
@@ -3887,8 +3903,8 @@ io.on('connection', (socket) => {
       if (p.lying) getUp(p);
       p.sitTo = null; p.sit = false; p.auto = null;
       p.tx = l.door.x; p.tz = l.door.z + 1.5; p.run = false; p.path = null;
-      const b = boundsOf('street');
-      const path = findPath((x, z) => ctxOf(p).walls.blocked(x, z), { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, { bx: b.bx, bz: b.bz, cell: 1 });
+      const b = boundsOf('street', p.city);
+      const path = findPath((x, z) => ctxOf(p).walls.blocked(x, z), { x: p.x, z: p.z }, { x: p.tx, z: p.tz }, pathBox(p, b, true, p.tx, p.tz));
       if (path && path.length) { p.path = path; p.pathKey = `${p.tx},${p.tz}`; }
     }
     notice(p, `Heading to ${rec.biz ? rec.biz.name : 'your lot'}.`);
@@ -4373,7 +4389,8 @@ io.on('connection', (socket) => {
     const ctx = ctxOf(p);
     if (!ctx.planJson) {
       const c = ctx.layout;
-      ctx.planJson = {
+      if (ctx.real) { const rp = REAL.planOf(ctx.id); ctx.planJson = { real: true, bx: 1200, bz: 1200, roadsEW: [], roadsNS: [], parks: [], tracks: [], doors: c.doors, buildings: [], ...rp }; }
+      else ctx.planJson = {
         bx: c.bx, bz: c.bz, roadsEW: c.roadsEW, roadsNS: c.roadsNS, parks: c.parks, tracks: c.tracks, doors: c.doors,
         buildings: c.buildings.map((b) => ({ x: b.x, z: b.z, w: b.w, d: b.d, k: b.k })),
       };
@@ -4632,8 +4649,11 @@ io.on('connection', (socket) => {
     moveNow(p, 'district', m.spawn.x, m.spawn.z);
   });
   // Walk into a real place: it becomes one of the game's own buildings (a bank, a hotel, a hospital...). Leaving puts you back at its door.
+  // Tests only (TEST_TP=1): put yourself anywhere in the city, to look at far places
+  socket.on('testTp', (t) => { if (process.env.TEST_TP !== '1' || p.room !== 'street' || !t || !Number.isFinite(t.x) || !Number.isFinite(t.z)) return; p.x = p.tx = t.x; p.z = p.tz = t.z; p.path = null; });
   socket.on('districtEnter', (i) => {
     if (p.room !== 'district' || p.trip || !Number.isInteger(i)) return;
+    if (p.drive) return notice(p, 'Park your car first.');
     if (jailLeft(p)) return;
     const m = MAPS.get(p.city);
     const q = m && m.pois[i];
@@ -4646,11 +4666,12 @@ io.on('connection', (socket) => {
   });
   socket.on('districtLeave', () => {
     if (p.room !== 'district' || p.trip) return;
+    if (p.drive) return notice(p, 'Park your car first.');
     const b = p.districtBack && p.districtBack.city === p.city ? p.districtBack : null;
-    moveNow(p, 'street', b ? b.x : CITY.spawn.x, b ? b.z : CITY.spawn.z);
+    moveNow(p, 'street', b ? b.x : spawnOf(p.city).x, b ? b.z : spawnOf(p.city).z);
   });
   socket.on('districtTp', (i) => {
-    if (p.room !== 'district' || p.trip || !Number.isInteger(i)) return;
+    if (p.room !== 'district' || p.trip || p.drive || !Number.isInteger(i)) return;
     const m = MAPS.get(p.city);
     const q = m && m.pois[i];
     if (!q) return;
@@ -4661,7 +4682,7 @@ io.on('connection', (socket) => {
     if (p.room === 'biz' && !p.trip) {
       if (Math.hypot(p.x - INSIDE_EXIT.x, p.z - 8.5) > DOOR_REACH) return notice(p, 'Walk up to the door first.');
       const l = ctxOf(p).layout.lots[p.bizLot];
-      return moveNow(p, 'street', l ? l.door.x : CITY.spawn.x, l ? l.door.z : CITY.spawn.z);
+      return moveNow(p, 'street', l ? l.door.x : spawnOf(p.city).x, l ? l.door.z : spawnOf(p.city).z);
     }
     if (p.room === 'friendhome' && !p.trip) {
       if (Math.hypot(p.x - INSIDE_EXIT.x, p.z - 8.5) > DOOR_REACH) return notice(p, 'Walk up to the door first.');
@@ -4679,7 +4700,7 @@ io.on('connection', (socket) => {
   // Get into your car (or bike) and drive it yourself, or park it.
   socket.on('drive', (req) => {
     if (!req || typeof req !== 'object' || typeof req.on !== 'boolean') return;
-    if (p.trip || p.room !== 'street' || jailLeft(p)) return;
+    if (p.trip || (p.room !== 'street' && p.room !== 'district') || jailLeft(p)) return;
     if (!req.on) {
       if (!p.drive) return;
       if (Math.abs(p.drive.v) > 3) return notice(p, 'Slow down before you park.');
@@ -4938,9 +4959,12 @@ setInterval(() => {
   const ph = phaseAt(now);
   for (const p of players.values()) {
     if (!p.drive) continue;
-    if (p.room !== 'street' || p.trip) { stopDriving(p); continue; }
-    const cx = ctxOf(p);
-    const carBlocked = (x, z) => cx.walls.blocked(x, z) || cx.traffic.blocked(x, z, 0.1) || Math.abs(x) > CITY.bx - 1 || Math.abs(z) > CITY.bz - 1;
+    if ((p.room !== 'street' && p.room !== 'district') || p.trip) { stopDriving(p); continue; }
+    const inD = p.room === 'district';          // the real map: buildings and water are solid, no traffic lights or police
+    const cx = inD ? null : ctxOf(p);
+    const dm = inD ? MAPS.get(p.city) : null;
+    if (inD && !dm) { stopDriving(p); continue; }
+    const carBlocked = inD ? dm.blocked : (x, z) => cx.walls.blocked(x, z) || cx.traffic.blocked(x, z, 0.1) || (!cx.real && (Math.abs(x) > CITY.bx - 1 || Math.abs(z) > CITY.bz - 1));
     const d = p.drive;
     stepSpeed(d, p.driveIn, dt);
     const hit = moveDrive(d, dt, carBlocked);
@@ -4955,12 +4979,14 @@ setInterval(() => {
     if (hit > 5 && now - (p.crashNote || 0) > 3000) { p.crashNote = now; notice(p, 'You crashed into something!'); }
     // running people over
     for (const o of players.values()) {
-      if (o === p || o.room !== 'street' || o.city !== p.city || o.trip || o.drive) continue;
+      if (o === p || o.room !== p.room || o.city !== p.city || o.trip || o.drive) continue;
       if (Math.abs(d.v) > 2.5 && Math.hypot(o.x - d.x, o.z - d.z) < VEH[d.kind].len + 0.6) {
         hurtByCar(o, Math.abs(d.v));
         startChase(p, 'hitrun', 'You hit someone and drove off! The police are after you!');
       }
     }
+    if (inD) continue;
+    if (cx.real) continue;   // the real cities have no signals or highway gates yet
     // red lights
     const cell = junctionAt(cx.layout, d.x, d.z);
     const key = cell ? `${cell.i},${cell.j}` : null;

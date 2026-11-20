@@ -19,6 +19,8 @@ import { initParty } from './partyUi.js';
 import { initRec } from './recUi.js';
 import { initHouse } from './houseUi.js';
 import { initRealMap } from './realMapUi.js';
+import './landscape.css';
+import { initOrientation } from './orientation.js';
 import { createDistrict } from './districtMap.js';
 import { initBoards } from './boardsUi.js';
 import { initVoice } from './voiceUi.js';
@@ -82,6 +84,7 @@ const party = initParty(socket, () => street);
 const rec = initRec(socket, () => street);
 initHouse(socket);
 initRealMap(socket);
+const orient = initOrientation();
 initBoards(socket);
 initVoice(socket);
 const garage = initGarage(socket, () => street);
@@ -522,7 +525,7 @@ function updateDrive(m) {
   if (on !== meDriving) { meDriving = on; walkInput.setDriving(on); carPanel.show(on); if (!on) setSeatView(false); }
   if (on) carPanel.setSpeed(m.drive.kmh, !!m.drive.rev);
   $('seatBtn').hidden = !on;
-  const onStreet = currentRoom === 'street' && !m.trip && !m.jail;
+  const onStreet = (currentRoom === 'street' || currentRoom === 'district') && !m.trip && !m.jail;
   const owns = Array.isArray(m.owns) && m.owns.length > 0;
   $('driveBtn').hidden = on || !onStreet || !owns;
   $('parkBtn').hidden = !on;
@@ -532,14 +535,14 @@ function updateDrive(m) {
   $('wantedBanner').hidden = !w;
   if (w) $('wantedBanner').textContent = `🚨 WANTED · ${w.cops} police car${w.cops === 1 ? '' : 's'} · escape or hide out of sight`;
 }
-$('driveBtn').onclick = () => socket.emit('drive', { on: true });
+$('driveBtn').onclick = () => { orient.lock(); socket.emit('drive', { on: true }); };
 $('parkBtn').onclick = () => socket.emit('drive', { on: false });
 
 loadModel();
 loadNpc();
 loadCar('police'); loadCar('taxi');
 if (location.search.includes('dumpSolids')) window.__interior = interior;
-if (location.search.includes('debug')) { window.__socket = socket; window.__three = { scene, camera, controls, renderer }; }
+if (location.search.includes('debug')) { window.__socket = socket; window.__realStats = () => (street && street.realStats ? street.realStats() : null); window.__three = { scene, camera, controls, renderer }; }
 
 // ---------- Police cars ----------
 const copCars = [];
@@ -1312,7 +1315,7 @@ function followMe(dt) {
     snapCam = false;
   }
   if (!me) return;
-  if (snapCam && roomInfoNow.district) {
+  if (snapCam && (roomInfoNow.district || (roomInfoNow.city && roomInfoNow.city.real))) {
     // The real map is open ground: the camera stands behind you, high enough to see the streets, and follows you.
     const p = me.group.position;
     controls.target.set(p.x, 0, p.z);

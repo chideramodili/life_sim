@@ -26,7 +26,7 @@ export function initRealMap(socket) {
       }
       if (!(cur.pois || []).length) body.append(el('div', 'fine', 'No named places in this part of the map.'));
     } else if (cur && cur.id === 'street') {
-      body.append(el('div', 'fine', 'Walk a real map of this city: real roads and buildings from OpenStreetMap. It is on foot only. Available in Abuja and Enugu for now (Lagos is coming).'));
+      body.append(el('div', 'fine', 'Walk a real map of this city: real roads and buildings from OpenStreetMap. You can walk it or drive on it. Available in Lagos (Yaba), Abuja and Enugu.'));
       const go = el('button', 'mpGo', '🚶 Walk into the real map'); go.addEventListener('click', () => { socket.emit('districtGo'); panel.hidden = true; }); body.append(go);
     } else body.append(el('div', 'fine', 'Go out on the street first, then open this app.'));
   }

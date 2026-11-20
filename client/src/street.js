@@ -4,10 +4,13 @@
 import { buildHouse } from './houseBuild.js';
 import * as THREE from 'three';
 import { iconOf } from './mapUi.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries as mergeGeo } from 'three/addons/utils/BufferGeometryUtils.js';
+const mergeGeometries = (list, ...rest) => (list.length ? mergeGeo(list, ...rest) : new THREE.BufferGeometry());   // an empty list (the real cities have no generated buildings) is fine
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { whenNpcReady, upgradeToNpc, moveNpc } from './npc.js';
 import { viaductSegs, createViaductTrains } from './trains.js';
+import { createRealTiles } from './realTiles.js';
+import { createLandmarks } from './landmarks.js';
 import { loadCar, carClone, carReady, makeVehicle, TRAFFIC_MODELS } from './vehicles.js';
 
 const rnd = (seed) => {
@@ -165,10 +168,15 @@ export function createCity(info) {
 
   // ---------- Ground, roads, sidewalks ----------
   const grass = track(canvasTex(128, 128, (g, w, h) => speckle(g, w, h, GRASS, 38, 3000), 70, 50));
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(city.bx * 2 + 400, city.bz * 2 + 400), standard({ map: grass }));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(city.bx * 2 + 400, city.bz * 2 + 400), city.real ? standard({ color: GRASS }) : standard({ map: grass }));
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.05;
   root.add(ground);
+  // A real city: the real roads and buildings stream in around you (see realTiles.js)
+  const realTiles = city.real ? createRealTiles(info.cityId, city.bx, city.tile, city.n, info.theme) : null;
+  if (realTiles) root.add(realTiles.group);
+  const landmarks = city.real ? createLandmarks(info.cityId) : null;
+  if (landmarks) root.add(landmarks.group);
 
   const asphalt = track(canvasTex(256, 256, (g, w, h) => speckle(g, w, h, LOOK.road, 30, 5000)));
   asphalt.repeat.set(1, 1);
@@ -464,7 +472,7 @@ export function createCity(info) {
 
   let viaductTrains = null;
   // ---------- The Express viaduct: an elevated railway over the Boulevard and the cross streets, reaching every station ----------
-  {
+  if (!city.real) {   // (the real cities have no viaduct yet)
     const Y = 7.2;
     const segs = viaductSegs(city);
     viaductTrains = createViaductTrains(root, segs, Y);
@@ -715,7 +723,7 @@ export function createCity(info) {
     if (redo) bodyI.instanceMatrix.needsUpdate = topI.instanceMatrix.needsUpdate = wheelF.instanceMatrix.needsUpdate = wheelB.instanceMatrix.needsUpdate = true;
   }
   // Police checkpoints on the main road (same rule as the server: two on the first east-west road). A patrol car, cones and a sign.
-  {
+  if (city.roadsEW.length) {
     const rw0 = city.roadsEW[0], cx = Math.round(city.bx * 0.42);
     for (const x of [-cx, cx]) {
       const g = new THREE.Group();
@@ -763,7 +771,7 @@ export function createCity(info) {
   const bodyGeo = new THREE.BoxGeometry(0.5, 0.65, 0.32), legGeo = new THREE.BoxGeometry(0.4, 0.55, 0.3), headGeo = new THREE.SphereGeometry(0.2, 8, 6);
   disposables.push(bodyGeo, legGeo, headGeo);
   const legMat = standard({ color: '#2c3e50' });
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < (city.roadsEW.length ? 90 : 0); i++) {
     const g = new THREE.Group();
     const topCol = CLOTH[Math.floor(rp() * CLOTH.length)], skinCol = SKIN[Math.floor(rp() * SKIN.length)];
     const torso = new THREE.Mesh(bodyGeo, standard({ color: topCol }));
@@ -795,7 +803,7 @@ export function createCity(info) {
       let best = null, bd = 1e9;
       for (const r of city.roadsEW) { const d = Math.abs(z - r.z); if (d < bd) { bd = d; best = { x, z: r.z }; } }
       for (const r of city.roadsNS) { const d = Math.abs(x - r.x); if (d < bd) { bd = d; best = { x: r.x, z }; } }
-      return best;
+      return best || { x, z: z + 4 };   // no street grid in the real cities: face the road a few metres off
     };
     const person = (x, z, faceX, faceZ) => {
       const g = new THREE.Group();
@@ -963,6 +971,8 @@ export function createCity(info) {
     },
     setViewer(x, z) { viewerX = x; viewerZ = z; },
     update(dt) {
+      if (realTiles) realTiles.update(viewerX, viewerZ);
+      if (landmarks) landmarks.update(viewerX, viewerZ);
       if (beaconObj) { beaconT += dt; beaconObj.userData.arrow.position.y = 5 + Math.sin(beaconT * 3) * 0.6; beaconObj.userData.ring.scale.setScalar(1 + Math.sin(beaconT * 4) * 0.08); }
       cullT += dt;
       if (cullT > 0.4) { cullT = 0; if (!viewerLast || Math.hypot(viewerX - viewerLast[0], viewerZ - viewerLast[1]) > 4) cullTrees(); }
@@ -1015,7 +1025,10 @@ export function createCity(info) {
         w.g.rotation.y = w.horizontal ? (w.dir > 0 ? Math.PI / 2 : -Math.PI / 2) : (w.dir > 0 ? 0 : Math.PI);
       }
     },
+    realStats() { return realTiles ? realTiles.stats() : null; },
     dispose() {
+      if (realTiles) realTiles.dispose();
+      if (landmarks) landmarks.dispose();
       treesGone = true;
       root.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
       for (const d of disposables) d.dispose && d.dispose();

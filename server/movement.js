@@ -39,11 +39,12 @@ export function slide(blocked, x, z, dx, dz) {
 }
 
 // A* on a grid, then pulled tight. Returns the points to walk through (not including where you are), or null if there is no way.
-export function findPath(blocked, from, to, { bx, bz, cell = 1, limit = 30000 } = {}) {
+export function findPath(blocked, from, to, { bx, bz, cell = 1, limit = 30000, ox = 0, oz = 0 } = {}) {
+  // (ox, oz) is the middle of the search box: the real cities are far too big to search whole, so they search a box around the trip
   const W = Math.ceil((2 * bx) / cell) + 1, H = Math.ceil((2 * bz) / cell) + 1;
-  const cx = (x) => Math.max(0, Math.min(W - 1, Math.round((x + bx) / cell)));
-  const cz = (z) => Math.max(0, Math.min(H - 1, Math.round((z + bz) / cell)));
-  const wx = (i) => i * cell - bx, wz = (j) => j * cell - bz;
+  const cx = (x) => Math.max(0, Math.min(W - 1, Math.round((x - ox + bx) / cell)));
+  const cz = (z) => Math.max(0, Math.min(H - 1, Math.round((z - oz + bz) / cell)));
+  const wx = (i) => i * cell - bx + ox, wz = (j) => j * cell - bz + oz;
   const idx = (i, j) => j * W + i;
   const open = (i, j) => !blocked(wx(i), wz(j));
   let gi = cx(to.x), gj = cz(to.z);

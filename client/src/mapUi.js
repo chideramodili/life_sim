@@ -26,6 +26,14 @@ export function paintPlan(g, plan, view) {
   const Z = (z) => (z - oz) * s + h / 2;
   g.fillStyle = '#6a8f52';
   g.fillRect(0, 0, w, h);
+  if (plan.real) {   // a real city: the real main roads, water and parks
+    const poly = (p) => { g.beginPath(); p.forEach(([x, z], i) => (i ? g.lineTo(X(x), Z(z)) : g.moveTo(X(x), Z(z)))); g.closePath(); g.fill(); };
+    g.fillStyle = '#9bbd7c'; for (const p of plan.gg || []) poly(p);
+    g.fillStyle = '#6fb3e0'; for (const p of plan.ww || []) poly(p);
+    g.strokeStyle = '#e4e0d2'; g.lineCap = 'round'; g.lineJoin = 'round';
+    for (const r of plan.rr || []) { g.lineWidth = Math.max(1.5, r.w * s); g.beginPath(); r.p.forEach(([x, z], i) => (i ? g.lineTo(X(x), Z(z)) : g.moveTo(X(x), Z(z)))); g.stroke(); }
+    return;
+  }
   g.fillStyle = '#9bbd7c';
   for (const p of plan.parks || []) g.fillRect(X(p.x0), Z(p.z0), (p.x1 - p.x0) * s, (p.z1 - p.z0) * s);
   g.fillStyle = '#e4e0d2';
@@ -76,8 +84,9 @@ export function createMapUi({ socket, getPos, getRooms, getCurrentRoom, getMetho
   };
 
   // ---------- the plan on the Map screen ----------
-  const SCALE = 2.6;
+  let SCALE = 2.6;
   function planNode(onChange) {
+    SCALE = state.plan && state.plan.real ? 0.9 : 2.6;   // the real city's map is much wider than the old street
     const wrap = el('div', 'planWrap');
     wrap.id = 'planWrap';
     if (!state.plan) {
