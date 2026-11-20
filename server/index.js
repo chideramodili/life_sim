@@ -205,6 +205,16 @@ const ACTIONS = {
   hotelsleep: { need: 'energy', label: 'Book a night', cost: 8000, gain: 65, onlyRoom: 'hotel' },
   event:  { need: 'fun',    label: 'Attend event', cost: 3000, gain: 60, onlyRoom: 'eventcenter' },
 };
+// Inside a house a player built (room 'biz' on a lot with a house and no business): what it has, and whether you own it.
+// Owners can sleep, eat, wash, use the toilet and relax if the house has the right furniture; visitors (when it is open) can sleep over and use the toilet.
+const HOUSE_NEEDS = { sleep: ['bed'], eat: ['fridge', 'stove'], shower: ['bath'], toilet: ['toilet'], play: ['tv', 'sofa', 'desk'] };
+const HOUSE_NOUN = { bed: 'a bed', fridge: 'a fridge or a cooker', bath: 'a bath', toilet: 'a toilet', tv: 'a TV, sofa or desk' };
+function houseUse(p) {
+  if (p.room !== 'biz') return null;
+  const rec = LOTS[p.city] && LOTS[p.city].get(p.bizLot);
+  if (!rec || !rec.house || !rec.house.cfg || rec.biz) return null;
+  return { rec, own: rec.owner === p.userId, kinds: new Set(rec.house.cfg.furn.map((f) => f.k)) };
+}
 const GUEST_SLEEP_GAIN = 55;  // sleeping over at a friend's house (better than a bench, worse than your own bed)
 const HOME_SLEEP_GAIN = 70;   // sleeping in your own bed (power on)
 const NO_POWER_SLEEP_GAIN = 25;
@@ -450,6 +460,8 @@ addColumn('staff_json', 'TEXT');   // hired driver / cleaner / cook
 addColumn('last_work3', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('city', 'TEXT');
 addColumn('home_city', 'TEXT');
+addColumn('vip', 'INTEGER NOT NULL DEFAULT 0');   // subscriber tier 0-3: blue dot by the name, crown over the head (set by the owner for now; no payments yet)
+addColumn('livein', 'TEXT');   // 'city:lot' of the house you built and live in (your old rent stops)
 addColumn('last_work2', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('stress', 'REAL NOT NULL DEFAULT 0');
 addColumn('sick', 'INTEGER NOT NULL DEFAULT 0');
@@ -507,6 +519,7 @@ const q = {
   allReports: db.prepare('SELECT r.id, ru.username AS reporter, r.reported_name AS reported, r.messages, r.room, r.created_at FROM reports r JOIN users ru ON ru.id = r.reporter_id ORDER BY r.id DESC LIMIT 50'),
   nextPlot: db.prepare('SELECT COALESCE(MAX(plot) + 1, 0) AS n FROM users'),
   setHomeCity: db.prepare('UPDATE users SET home_city = ? WHERE id = ?'),
+  setLiveIn: db.prepare('UPDATE users SET livein = ? WHERE id = ?'),
   setPlot: db.prepare('UPDATE users SET plot = ? WHERE id = ?'),
   userByPhone: db.prepare('SELECT * FROM users WHERE phone = ?'),
   setPhone: db.prepare('UPDATE users SET phone = ? WHERE id = ?'),
@@ -903,6 +916,17 @@ app.post('/api/admin/event', (req, res) => {
   startEvent(id);
   res.json({ ok: true });
 });
+// Give or take away a subscriber level: POST {"user":"NAME","tier":0-3}. Tier 0 removes the dot and crown.
+app.post('/api/admin/vip', (req, res) => {
+  if (!adminOk(req, res)) return;
+  const u = q.userByName.get(String((req.body && req.body.user) || ''));
+  if (!u) return res.status(404).json({ error: 'No such player.' });
+  const tier = Math.floor(Number(req.body && req.body.tier));
+  if (!Number.isFinite(tier) || tier < 0 || tier > 3) return res.status(400).json({ error: 'tier must be 0, 1, 2 or 3.' });
+  db.prepare('UPDATE users SET vip = ? WHERE id = ?').run(tier, u.id);
+  for (const p of players.values()) if (p.userId === u.id) p.vip = tier;
+  res.json({ ok: true, user: u.username, tier });
+});
 // The bank record for one player (for you, the owner): GET /api/admin/ledger?user=NAME&limit=100.
 app.get('/api/admin/ledger', (req, res) => {
   if (!adminOk(req, res)) return;
@@ -999,7 +1023,7 @@ function roomInfo(id, p = null) {
   } else if (id === 'biz') {
     info.exit = INSIDE_EXIT;
     const rec = p ? LOTS[p.city].get(p.bizLot) : null;
-    if (rec && rec.house && rec.house.cfg && !rec.biz) { info.name = `${rec.ownerName}'s house`; info.house = rec.house.cfg; info.bizLot = p.bizLot; info.owner = rec.ownerName; info.accent = '#c9a227'; }
+    if (rec && rec.house && rec.house.cfg && !rec.biz) { info.name = `${rec.ownerName}'s house`; info.house = rec.house.cfg; info.bizLot = p.bizLot; info.owner = rec.ownerName; info.accent = '#c9a227'; info.houseOwn = rec.owner === p.userId; }
     if (rec && rec.biz) { info.name = rec.biz.name; info.bizKind = rec.biz.kind; info.bizLot = p.bizLot; info.bizLevel = rec.biz.level; info.bizStaff = rec.biz.staff || 0; info.accent = { cafe: '#ff9f1c', minimart: '#4cc9a0', salon: '#ff7eb6', gym: '#7ad7ff' }[rec.biz.kind] || r.accent; info.owner = rec.ownerName; }
   } else if (id === 'friendhome') {
     info.exit = INSIDE_EXIT;
@@ -1022,6 +1046,7 @@ function snapshot(key) {
       if (p.lying) o.lie = 1;
       if (p.anim && p.anim.until > Date.now()) o.an = p.anim.k;
       if (p.body === 'woman') o.b = 1;
+      if (p.vip > 0) o.vp = p.vip;
       if (p.look2) o.v2 = look2Str(p.look2);
       if (p.eyes && p.eyes !== 'brown') o.e = p.eyes;
       if (p.skin) o.s = p.skin;
@@ -2707,6 +2732,8 @@ io.on('connection', (socket) => {
     room,
     city: homeCity,
     homeCity: myHomeCity,
+    livein: user.livein || null,
+    vip: Math.max(0, Math.min(3, Number(user.vip) || 0)),
     trip: null,
     x: room === 'street' ? spawnOf(homeCity).x : 0, z: room === 'street' ? spawnOf(homeCity).z : 0, tx: room === 'street' ? spawnOf(homeCity).x : 0, tz: room === 'street' ? spawnOf(homeCity).z : 0,
     color: COLORS[user.id % COLORS.length],
@@ -2939,6 +2966,23 @@ io.on('connection', (socket) => {
     const now = Date.now();
     if (now - (p.lastAct[type] || 0) < ACTION_COOLDOWN_MS) return notice(p, 'Slow down a little.');
     const a = ACTIONS[type];
+    const hu = HOUSE_NEEDS[type] ? houseUse(p) : null;
+    if (hu) {
+      const items = HOUSE_NEEDS[type], have = items.some((k) => hu.kinds.has(k));
+      if (!hu.own && type !== 'sleep' && type !== 'toilet') return notice(p, 'This is not your house. You can sleep over or use the toilet.');
+      if (!have) return notice(p, `This house has no ${HOUSE_NOUN[items[0]]}. ${hu.own ? 'Add one in the House Builder.' : ''}`.trim());
+      const a2 = ACTIONS[type];
+      if (p.cash < a2.cost) return notice(p, `Not enough cash. ${a2.label} costs ₦${a2.cost}.`);
+      const power2 = !consequences(p.bills).noPower;
+      let gain2 = a2.gain, extra2 = '';
+      if (type === 'sleep') { gain2 = !hu.own ? GUEST_SLEEP_GAIN : power2 ? HOME_SLEEP_GAIN : NO_POWER_SLEEP_GAIN; extra2 = !hu.own ? ' A friend\'s spare bed.' : power2 ? ' Your own bed!' : ' No power, no fan. Poor sleep.'; }
+      if (type === 'shower' && !power2) { gain2 = NO_POWER_SHOWER_GAIN; extra2 = ' Cold water only.'; }
+      p.lastAct[type] = now; progGain(p, 'act'); p.cash -= a2.cost;
+      p[a2.need] = Math.min(100, p[a2.need] + gain2);
+      const calm2 = type === 'sleep' && hu.own && power2 ? STRESS.sleepHome : STRESS.actions[type];
+      if (calm2 !== undefined) p.stress = clampStress(p.stress + calm2);
+      return notice(p, `${a2.label}: ${NEED_LABELS[a2.need]} +${gain2}.${extra2}`);
+    }
     const guestSleep = type === 'sleep' && p.room === 'friendhome'; // a friend let you in: you may sleep over
     if (a.onlyRoom && p.room !== a.onlyRoom && !guestSleep) return notice(p, `${a.label} only works at the ${ROOMS[a.onlyRoom].name}.`);
     if (a.needsCompany && !hasCompany(p)) return notice(p, 'Nobody here to chat with.');
@@ -3964,7 +4008,7 @@ io.on('connection', (socket) => {
       const l = CITY_CTX[c].layout.lots[id];
       const mc = HS.maxCells(l);
       const built = rec.house && rec.house.cfg ? rec.house.cfg : null;
-      out.push({ city: c, cityName: CITIES[c].name, id, lotW: l.w, lotD: l.d, max: mc, hasBiz: Boolean(rec.biz), leased: Boolean(rec.lease), built, draft: rec.house ? rec.house.draft : null, open: Boolean(rec.house && rec.house.open), cost: built ? HS.costOf(built) : null });
+      out.push({ city: c, cityName: CITIES[c].name, id, lotW: l.w, lotD: l.d, max: mc, hasBiz: Boolean(rec.biz), leased: Boolean(rec.lease), built, livein: p.livein === `${c}:${id}`, draft: rec.house ? rec.house.draft : null, open: Boolean(rec.house && rec.house.open), cost: built ? HS.costOf(built) : null });
     }
     return out;
   };
@@ -4017,6 +4061,19 @@ io.on('connection', (socket) => {
     if (wasNew) progGain(p, 'house', 1);
     broadcastLots(req.city);
     sendHouses(); save(p);
+  });
+  // Move into a house you built (it needs a bed): the rent on your starter home stops while you live here.
+  socket.on('houseMoveIn', (req) => {
+    const rec = houseRec(req);
+    if (!rec || !rec.house || !rec.house.cfg) return notice(p, 'Build the house first.');
+    if (!rec.house.cfg.furn.some((f) => f.k === 'bed')) return notice(p, 'You need a bed in the house before you can live there.');
+    p.livein = `${req.city}:${req.id}`; q.setLiveIn.run(p.livein, p.userId);
+    notice(p, 'You moved in. Your old rent stops while you live here.'); sendHouses(); sendBills(p);
+  });
+  socket.on('houseMoveOut', () => {
+    if (!p.livein) return;
+    p.livein = null; q.setLiveIn.run(null, p.userId);
+    notice(p, 'You moved out. Your old rent counts down again.'); sendHouses(); sendBills(p);
   });
   socket.on('houseAccess', (req) => {
     const rec = houseRec(req);
@@ -5269,6 +5326,12 @@ setInterval(() => {
   for (const p of players.values()) {
     // Bills only count down while you are online.
     tickBills(p.bills, dtMin);
+    // Living in a house you built means no rent to Mr. Sule. If you lost the house, you are back to paying rent.
+    if (p.livein) {
+      const [lc, li] = p.livein.split(':'); const rec = LOTS[lc] && LOTS[lc].get(Number(li));
+      if (rec && rec.owner === p.userId && rec.house && rec.house.cfg) p.bills.rent = Math.max(p.bills.rent, 7 * DAY_MIN);
+      else { p.livein = null; q.setLiveIn.run(null, p.userId); notice(p, 'You no longer own that house, so your old rent is due again.'); }
+    }
     for (const id of BILL_IDS) {
       const st = billStatus(p.bills[id]);
       if (st !== p.billState[id]) {

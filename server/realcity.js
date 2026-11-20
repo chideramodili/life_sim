@@ -7,7 +7,8 @@ import fs from 'node:fs';
 const CELL = 2;
 const CACHE_MAX = 60;
 export const DOOR_REACH_REAL = 3.5;
-const dir = (city) => new URL(`./maps/real/${city}/`, import.meta.url);
+// The folder is `maps/real` (with an s). If it was copied in as `map/real` by mistake, use that one instead.
+const dir = (city) => { const a = new URL(`./maps/real/${city}/`, import.meta.url); if (fs.existsSync(new URL('index.json', a))) return a; const b = new URL(`./map/real/${city}/`, import.meta.url); return fs.existsSync(new URL('index.json', b)) ? b : a; };
 const readJson = (u) => { try { return JSON.parse(fs.readFileSync(u, 'utf8')); } catch { return null; } };
 
 // A small repeatable random number generator, so a city's lots and homes are the same on every start.

@@ -66,7 +66,7 @@ export function createDistrict(mapId) {
   const live = new Map();       // chunk key -> THREE.Mesh
   let ready = false, dead = false, px = 1e9, pz = 1e9;
 
-  fetch(`/maps/${mapId}.json`).then((r) => r.json()).then((d) => {
+  fetch(`/maps/${mapId}.json`).then((r) => (r.ok && /json/i.test(r.headers.get('content-type') || '') ? r.json() : fetch(`/map/${mapId}.json`).then((r2) => r2.json()))).then((d) => {
     if (dead) return;
     const slot = (x, z) => { const k = key(x, z); let s = wanted.get(k); if (!s) { s = { x: (Math.floor(x / CH) + 0.5) * CH, z: (Math.floor(z / CH) + 0.5) * CH, roads: [], blds: [] }; wanted.set(k, s); } return s; };
     // Roads are cut into pieces so a long road is drawn only near you.

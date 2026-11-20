@@ -59,6 +59,16 @@ function merge(parts) {
 }
 
 // info: { id: 'enugu', half, tile, n }  (the server's index.json). Returns { group, update(x, z), stats(), dispose() }
+// The folder is public/maps/real; if it was put in public/map/real by mistake, that one is used instead.
+let realBase = '/maps/real';
+async function getTile(cityId, k) {
+  for (let n = 0; n < 2; n++) {
+    try { const r = await fetch(`${realBase}/${cityId}/${k}.json`); if (r.ok && /json/i.test(r.headers.get('content-type') || '')) return await r.json(); } catch { /* next */ }
+    if (n === 0 && realBase === '/maps/real') { const alt = '/map/real'; try { const r2 = await fetch(`${alt}/${cityId}/index.json`); if (r2.ok && /json/i.test(r2.headers.get('content-type') || '')) { realBase = alt; continue; } } catch { /* none */ } }
+    break;
+  }
+  return null;
+}
 export function createRealTiles(cityId, half, T, N, theme = {}) {
   const group = new THREE.Group();
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
@@ -75,7 +85,7 @@ export function createRealTiles(cityId, half, T, N, theme = {}) {
     if (tiles.has(k) || i < 0 || j < 0 || i >= N || j >= N) return;
     const t = { state: 'loading', chunks: new Map(), areas: [], i, j };
     tiles.set(k, t);
-    fetch(`/maps/real/${cityId}/${k}.json`).then((r) => (r.ok ? r.json() : null)).then((d) => {
+    getTile(cityId, k).then((d) => {
       if (dead) return;
       if (!d) { t.state = 'none'; return; }
       const slot = (x, z) => { const ck = `${Math.floor(x / CH)},${Math.floor(z / CH)}`; let s = t.chunks.get(ck); if (!s) { s = { x: (Math.floor(x / CH) + 0.5) * CH, z: (Math.floor(z / CH) + 0.5) * CH, roads: [], blds: [] }; t.chunks.set(ck, s); } return s; };

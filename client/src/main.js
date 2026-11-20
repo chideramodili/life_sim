@@ -403,6 +403,7 @@ function makeAvatar(color, isMe, name) {
   tag.scale.set(2.2, 0.55, 1);
   tag.position.y = 2.1;
   group.add(tag);
+  group.userData.tag = tag; group.userData.tagName = name; group.userData.tagMe = isMe; group.userData.vip = 0;
   if (isMe) {
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.7, 24), new THREE.MeshBasicMaterial({ color: '#ffffff', side: THREE.DoubleSide }));
     ring.rotation.x = -Math.PI / 2;
@@ -411,6 +412,28 @@ function makeAvatar(color, isMe, name) {
   }
   scene.add(group);
   return group;
+}
+
+// Subscribers: a blue dot after the name and a small gold crown floating over the head (tier 3 has a bigger crown).
+function setVip(group, tier) {
+  const u = group.userData; tier = tier || 0;
+  if (u.vip === tier) return; u.vip = tier;
+  if (u.tag) { group.remove(u.tag); if (u.tag.material.map) u.tag.material.map.dispose(); u.tag.material.dispose(); }
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 64; const g = cv.getContext('2d');
+  g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(0, 0, 256, 64);
+  g.font = 'bold 36px system-ui, sans-serif'; g.textBaseline = 'middle'; g.textAlign = 'left';
+  const w = g.measureText(u.tagName).width, dot = tier > 0 ? 26 : 0, x0 = (256 - w - dot) / 2;
+  g.fillStyle = u.tagMe ? '#ffc857' : '#ffffff'; g.fillText(u.tagName, x0, 36);
+  if (tier > 0) { g.fillStyle = '#2f8cff'; g.beginPath(); g.arc(x0 + w + 16, 32, 9, 0, Math.PI * 2); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 2; g.stroke(); }
+  const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true }));
+  tag.scale.set(2.2, 0.55, 1); tag.position.y = tier > 0 ? 2.3 : 2.1; group.add(tag); u.tag = tag;
+  if (u.crown) { group.remove(u.crown); u.crown.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); u.crown = null; }
+  if (tier > 0) {
+    const gold = new THREE.MeshBasicMaterial({ color: '#ffc928' }), cr = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.13, 0.1, 8, 1, true), gold); ring.material.side = THREE.DoubleSide; cr.add(ring);
+    for (let i = 0; i < 5; i++) { const a = (i / 5) * Math.PI * 2, sp = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.12, 4), gold); sp.position.set(Math.cos(a) * 0.14, 0.1, Math.sin(a) * 0.14); cr.add(sp); }
+    cr.position.y = 1.8; cr.scale.setScalar(tier >= 3 ? 1.5 : 1); group.add(cr); u.crown = cr;
+  }
 }
 
 function clearAvatars() {
@@ -480,6 +503,7 @@ socket.on('state', ({ room, players, cars, lvl, cops, ph }) => {
     { const bd = p.b ? 'woman' : 'man'; const gm = a.group.userData.model; if (gm && (gm.body !== bd || (v2 && (!gm.p2 || gm.p2.g !== v2.g)) || (!v2 && gm.p2))) attachModel(a.group, bd, v2); }
     applyLook(a.group, v2 ? { v2 } : { eyes: p.e || 'brown', skin: p.s || 0, hair: p.h || 'brown', style: p.y || 'original', face: p.f });
     a.group.userData.baseColor = p.color;
+    setVip(a.group, p.vp || 0);
     dressAvatar(a.group, p.look, fashionCat);
     a.working = Boolean(p.work);
     a.group.userData.work = typeof p.work === 'string' ? { style: p.work, face: p.wf != null ? p.wf : null } : null;
@@ -610,7 +634,10 @@ let actionDefs = {};
 function refreshActions() {
   for (const [needId, e] of Object.entries(needEls)) {
     const options = Object.entries(actionDefs).filter(([, a]) => a.need === needId);
-    const entry = options.find(([k, a]) => a.onlyRoom && (a.onlyRoom === currentRoom || (k === 'sleep' && currentRoom === 'friendhome'))) || options.find(([, a]) => !a.onlyRoom);
+    // In a house you built: your own house works like home (the buttons need the right furniture); someone else's open house lets you sleep over
+    const inHouse = currentRoom === 'biz' && roomInfoNow && roomInfoNow.house;
+    const room = inHouse && roomInfoNow.houseOwn ? 'home' : currentRoom;
+    const entry = options.find(([k, a]) => a.onlyRoom && (a.onlyRoom === room || (k === 'sleep' && (currentRoom === 'friendhome' || inHouse)))) || options.find(([, a]) => !a.onlyRoom);
     e.btn.hidden = !entry;
     e.btn.dataset.act = entry ? entry[0] : '';
     e.btn.textContent = entry ? `${entry[1].label}${entry[1].cost ? ' ₦' + fmt(entry[1].cost) : ''}` : '';

@@ -13,7 +13,8 @@ export const ENTER_REACH = 14;           // metres: you must be this close to wa
 const slug = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
 
 function read(cityId) {
-  try { return JSON.parse(fs.readFileSync(new URL(`./maps/${cityId}.json`, import.meta.url), 'utf8')); } catch { return null; }
+  for (const d of ['maps', 'map']) { try { return JSON.parse(fs.readFileSync(new URL(`./${d}/${cityId}.json`, import.meta.url), 'utf8')); } catch { /* try the other spelling */ } }
+  return null;
 }
 
 // Mark every grid square whose centre is inside the polygon.

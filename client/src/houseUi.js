@@ -113,7 +113,9 @@ export function initHouse(socket) {
       const op = el('button', 'hbGo alt', l.open ? 'Make friends-only' : 'Open to everyone'); op.addEventListener('click', () => socket.emit('houseAccess', { city: l.city, id: l.id, open: !l.open }));
       const rn = el('button', 'hbGo', 'Renovate'); rn.addEventListener('click', () => { cfg = clone(l.built); mode = 'custom'; dirty = false; chk = null; paint(); socket.emit('houseCheck', { ...sel, cfg }); });
       const dm = el('button', 'hbGo alt', 'Demolish'); dm.addEventListener('click', () => { if (dm.dataset.sure) socket.emit('houseDemolish', { city: l.city, id: l.id }); else { dm.dataset.sure = 1; dm.textContent = `Tap again: get ${naira(l.cost.total / 2)} back`; } });
-      b.append(op, rn, dm); card.append(b);
+      const li = el('button', 'hbGo', l.livein ? '🏠 You live here (move out)' : '🛏️ Move in (stops your old rent)');
+      li.addEventListener('click', () => (l.livein ? socket.emit('houseMoveOut') : socket.emit('houseMoveIn', { city: l.city, id: l.id })));
+      b.append(li, op, rn, dm); card.append(b);
       body.append(card);
       return;
     }

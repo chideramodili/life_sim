@@ -8,17 +8,19 @@
   }
   /* sign-up, log-in and recovery: compact and scrollable */
   #auth, #signupPage, #loginPage, #reset, #recovery { max-height: calc(100vh - 12px); overflow-y: auto; padding: 12px 16px !important; width: min(360px, 60vw) !important; }
-  /* the phone home screen is tall; in landscape it becomes a wide card */
-  #phoneFrame { width: min(560px, 92vw); height: calc(100vh - 12px); border-radius: 28px; padding: 6px; }
-  #phoneScreen { border-radius: 22px; padding: 0 14px 8px; }
-  #phoneNotch, #phoneBar { display: none; }
-  #phoneStatus { margin-top: 8px; }
-  #phoneClock { font-size: 34px; margin-top: 4px; }
-  #phoneDate { font-size: 13px; margin-top: 0; }
-  #nightBtn { margin-top: 6px; height: 28px; }
-  #phoneSearch { margin-top: 6px; height: 32px; }
-  #appGrid { grid-template-columns: repeat(6, 1fr); margin-top: 8px; gap: 10px 6px; }
-  .app .ico { width: 48px; height: 48px; font-size: 24px; border-radius: 14px; }
+  /* the phone home screen is tall; in landscape it becomes a wide card with two columns:
+     clock, night mode and search on the left, the apps on the right (they scroll if there are more than fit) */
+  html body #phoneFrame { width: min(620px, 94vw); height: calc(100vh - 12px); border-radius: 28px; padding: 6px; }
+  html body #phoneScreen { border-radius: 22px; padding: 10px 14px 10px; display: grid; grid-template-columns: minmax(120px, 34%) 1fr; grid-template-rows: auto auto auto auto 1fr; column-gap: 14px; align-content: stretch; }
+  html body #phoneNotch, html body #phoneBar, html body #phoneStatus { display: none !important; }
+  html body #phoneClock { grid-column: 1; grid-row: 1; font-size: 34px; margin-top: 2px; }
+  html body #phoneDate { grid-column: 1; grid-row: 2; font-size: 13px; margin-top: 0; }
+  html body #nightBtn { grid-column: 1; grid-row: 3; margin-top: 8px; height: 28px; justify-self: start; }
+  html body #phoneSearch { grid-column: 1; grid-row: 4; margin-top: 8px; height: 32px; min-width: 0; }
+  html body #appGrid { grid-column: 2; grid-row: 1 / span 5; margin-top: 0; padding: 2px 2px 8px; grid-template-columns: repeat(4, 1fr); gap: 10px 6px; min-height: 0; overflow-y: auto; align-content: start; }
+  html body .app .ico { width: 48px; height: 48px; font-size: 24px; border-radius: 14px; }
+  html body .app .lbl { max-width: 70px; font-size: 11px; }
+  html body #phoneClose2 { top: auto; bottom: 16px; left: 22px; right: auto; height: 28px; font-size: 13px; z-index: 6; }
   /* the character creator: keep Save off the tabs */
   #creator .crSheet { padding-top: 52px; box-sizing: border-box; }
   /* buttons that float at the bottom move up a little so the needs bar does not cover them */
