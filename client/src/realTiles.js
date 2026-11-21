@@ -38,23 +38,67 @@ function ribbon(pts, w, y, c) {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setIndex(idx);
   return paint(upNormals(g.toNonIndexed()), c);
 }
-function building(pts, h, c, roofC) {
+// A window texture: one bay (a window on a plain wall). The top-left corner stays plain, so roofs, roads and ground (which have no uv) show only their own colour.
+function windowTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ffffff'; g.fillRect(0, 0, 64, 64);
+  g.fillStyle = '#c9c9c9'; g.fillRect(0, 56, 64, 8);                    // a floor band
+  g.fillStyle = '#9aa0a6'; g.fillRect(17, 15, 30, 34);                    // window frame
+  g.fillStyle = '#3d4d5e'; g.fillRect(20, 18, 24, 28);                    // glass
+  g.fillStyle = '#9fb4c8'; g.fillRect(20, 18, 24, 6);                     // sky reflection
+  g.fillStyle = '#9aa0a6'; g.fillRect(31, 18, 2, 28);                     // bar
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 2; return t;
+}
+const BAY = 3.4, FLOOR = 3.2;
+const ROOFS = ['#9c4a35', '#7d4636', '#a0522d', '#6b6f76', '#8a3f30', '#5d5f66'];
+function building(pts, h, c, roofC, r, roofPal) {
   const ring = pts.slice();
+  if (ring.length > 2 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]) ring.pop();
   let mx = 0, mz = 0; for (const p of ring) { mx += p[0]; mz += p[1]; } mx /= ring.length; mz /= ring.length;
   { const a = ring[0], b = ring[1], dx = b[0] - a[0], dz = b[1] - a[1]; if ((-dz) * ((a[0] + b[0]) / 2 - mx) + dx * ((a[1] + b[1]) / 2 - mz) < 0) ring.reverse(); }
-  const n = ring.length, wp = [], wn = [];
+  const n = ring.length, wp = [], wn = [], wu = [];
+  const floors = Math.max(1, Math.round(h / FLOOR));
   for (let i = 0; i < n; i++) {
     const a = ring[i], b = ring[(i + 1) % n]; const dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz) || 1, nx = -dz / L, nz = dx / L;
+    const bays = Math.max(1, Math.round(L / BAY));
     wp.push(a[0], 0, a[1], b[0], 0, b[1], b[0], h, b[1], a[0], 0, a[1], b[0], h, b[1], a[0], h, a[1]); for (let k = 0; k < 6; k++) wn.push(nx, 0, nz);
+    wu.push(0, 0, bays, 0, bays, floors, 0, 0, bays, floors, 0, floors);
   }
-  const wg = new THREE.BufferGeometry(); wg.setAttribute('position', new THREE.Float32BufferAttribute(wp, 3)); wg.setAttribute('normal', new THREE.Float32BufferAttribute(wn, 3)); paint(wg, c);
-  const parts = [wg]; const rg = flat(ring, h, roofC); if (rg) parts.push(rg);
+  const wg = new THREE.BufferGeometry(); wg.setAttribute('position', new THREE.Float32BufferAttribute(wp, 3)); wg.setAttribute('normal', new THREE.Float32BufferAttribute(wn, 3)); wg.setAttribute('uv', new THREE.Float32BufferAttribute(wu, 2)); paint(wg, c);
+  const parts = [wg];
+  // area and how "box-like" the footprint is: small, simple buildings get a pitched roof; bigger ones a flat roof
+  let area = 0, x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+  for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; area += a[0] * b[1] - b[0] * a[1]; x0 = Math.min(x0, a[0]); x1 = Math.max(x1, a[0]); z0 = Math.min(z0, a[1]); z1 = Math.max(z1, a[1]); }
+  area = Math.abs(area) / 2;
+  const boxy = area / Math.max(1, (x1 - x0) * (z1 - z0));
+  if (n <= 8 && n >= 3 && area < 320 && h <= 10 && boxy > 0.5) {
+    const rise = Math.min(2.8, 1.2 + Math.sqrt(area) * 0.08), rc = col(roofPal[Math.floor(r * 53) % roofPal.length]);
+    const pp = [], nn = [];
+    for (let i = 0; i < n; i++) {
+      const a = ring[i], b = ring[(i + 1) % n];
+      const ux = b[0] - a[0], uy = 0, uz = b[1] - a[1], vx = mx - a[0], vy = rise, vz = mz - a[1];
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const L = Math.hypot(nx, ny, nz) || 1; nx /= L; ny /= L; nz /= L;
+      if (ny < 0) { nx = -nx; ny = -ny; nz = -nz; }
+      pp.push(a[0], h, a[1], b[0], h, b[1], mx, h + rise, mz); for (let k = 0; k < 3; k++) nn.push(nx, ny, nz);
+    }
+    const rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.Float32BufferAttribute(pp, 3)); rg.setAttribute('normal', new THREE.Float32BufferAttribute(nn, 3)); paint(rg, rc);
+    parts.push(rg);
+  } else {
+    const rg = flat(ring, h, roofC); if (rg) parts.push(rg);
+    // a low rim around a flat roof
+    const rim = []; for (let i = 0; i < n; i++) { const a = ring[i], b = ring[(i + 1) % n]; const dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz) || 1, nx = -dz / L, nz = dx / L; const q = new THREE.BufferGeometry(); q.setAttribute('position', new THREE.Float32BufferAttribute([a[0], h, a[1], b[0], h, b[1], b[0], h + 0.7, b[1], a[0], h, a[1], b[0], h + 0.7, b[1], a[0], h + 0.7, a[1]], 3)); q.setAttribute('normal', new THREE.Float32BufferAttribute([nx, 0, nz, nx, 0, nz, nx, 0, nz, nx, 0, nz, nx, 0, nz, nx, 0, nz], 3)); rim.push(paint(q, roofC)); }
+    parts.push(...rim);
+  }
   return parts;
 }
 function merge(parts) {
   const ok = parts.filter((g) => g && g.attributes.position.count > 0);
   if (!ok.length) return null;
-  for (const g of ok) for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color'].includes(k)) g.deleteAttribute(k);
+  for (const g of ok) {
+    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'color', 'uv'].includes(k)) g.deleteAttribute(k);
+    if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));   // (0,0) is the plain corner of the window texture
+  }
   const m = mergeGeometries(ok, false); for (const g of ok) g.dispose(); return m;
 }
 
@@ -71,12 +115,16 @@ async function getTile(cityId, k) {
 }
 export function createRealTiles(cityId, half, T, N, theme = {}) {
   const group = new THREE.Group();
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const wtex = windowTex();
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: wtex, side: THREE.DoubleSide });
   const tiles = new Map();      // "i_j" -> { state: 'loading'|'ready'|'none', chunks: Map, areas: [] }
   const live = new Map();       // "i_j|cx,cz" -> Mesh
   const areaMeshes = new Map(); // "i_j" -> Mesh[]
   const areaQueue = [];         // polygons waiting to be triangulated
   let dead = false;
+  const wl = theme.look && theme.look.walls ? Object.values(theme.look.walls).filter((v) => typeof v === 'string' && v[0] === '#') : [];
+  const pal = wl.length ? wl.concat(PAL.slice(0, 3)) : PAL;   // each city's own wall colours
+  const roofPal = theme.look && theme.look.roof ? [theme.look.roof, ...ROOFS.slice(0, 3), '#6b6f76'] : ROOFS;
   const GREEN = (theme.look && theme.look.parks && theme.look.parks[0]) || '#8fc47a';
 
   const tileKey = (i, j) => `${i}_${j}`;
@@ -110,8 +158,8 @@ export function createRealTiles(cityId, half, T, N, theme = {}) {
     s.roads.sort((a, b) => a.w - b.w).forEach((r, i) => parts.push(ribbon(r.p, r.w, (r.b ? 0.45 : 0.3) + i * 0.0008, col(ROAD[r.c] || '#8a8a8e'))));
     for (const b of s.blds) {
       const r = hash(Math.round(b.cx), Math.round(b.cz)); const h = b.h || 3.2 + Math.floor(r * 3) * 3.2;
-      const wall = col(PAL[Math.floor(r * 97) % PAL.length], 0.9 + r * 0.15), roof = col(PAL[(Math.floor(r * 97) + 2) % PAL.length], 0.7);
-      for (const g of building(b.p, h, wall, roof)) parts.push(g);
+      const wall = col(pal[Math.floor(r * 97) % pal.length], 0.9 + r * 0.15), roof = col(pal[(Math.floor(r * 97) + 2) % pal.length], 0.6);
+      for (const g of building(b.p, h, wall, roof, r, roofPal)) parts.push(g);
     }
     const geo = merge(parts); if (!geo) return null;
     const m = new THREE.Mesh(geo, mat); m.frustumCulled = false; return m;
@@ -161,7 +209,7 @@ export function createRealTiles(cityId, half, T, N, theme = {}) {
       for (const m of live.values()) if (m) m.geometry.dispose();
       for (const arr of areaMeshes.values()) for (const m of arr) m.geometry.dispose();
       live.clear(); tiles.clear(); areaMeshes.clear(); areaQueue.length = 0;
-      mat.dispose();
+      mat.dispose(); wtex.dispose();
     },
   };
 }

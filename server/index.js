@@ -166,7 +166,7 @@ const pathBox = (p, b, street, tx, tz, cell = 1) => {
   return street ? { bx: b.bx, bz: b.bz, cell: 1 } : { bx: b.bx, bz: b.bz, cell: 0.5 };
 };
 // Where you appear on the street when nothing says otherwise: the old city's start, or the front of the real city's Plaza
-const spawnOf = (cityId) => { const c = CITY_CTX[cityId] || LAGOS; if (!c.real || process.env.CITY_SPAWN) return CITY.spawn; const d = c.layout.doors.plaza || c.layout.doors.shop || { x: 0, z: 0 }; return { x: d.x, z: d.z + 1.5 }; };
+const spawnOf = (cityId) => { const c = CITY_CTX[cityId] || LAGOS; if (!c.real || process.env.CITY_SPAWN) return CITY.spawn; const d = c.layout.doors.plaza || c.layout.doors.shop || { x: 0, z: 0 }; const a = d.ry || 0; return { x: d.x + Math.sin(a) * 2.5, z: d.z + Math.cos(a) * 2.5 }; };
 const CITY_SPEED = 1.7;          // outdoors you walk briskly, because the city is big
 const INSIDE_EXIT = { x: 0, z: 9.5 }; // the door out of every building, on its south wall
 // Plots: every player has a house on a plot in a residential area. (With more players than plots, two players share the same spot. Homes are still private.)

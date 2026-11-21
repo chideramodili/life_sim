@@ -1220,7 +1220,7 @@ $('sitBtn').addEventListener('click', () => {
   const a = avatars.get(myId);
   if (!a) return;
   if (a.sit) { socket.emit('sit'); return; }
-  const spots = currentRoom === 'home' || currentRoom === 'friendhome' ? furniture.seats() : interior.seats();
+  const spots = currentRoom === 'home' || currentRoom === 'friendhome' ? furniture.seats() : currentRoom === 'street' && street && street.seats ? street.seats() : interior.seats();
   let best = null, bd = 6;
   for (const s of spots) { const d = Math.hypot(s.x - a.group.position.x, s.z - a.group.position.z); if (d < bd) { bd = d; best = s; } }
   if (!best) { notice('There is no chair nearby to sit on.'); return; }

@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "ara3d": "^0.12.0",
     "socket.io-client": "^4.7.5",
     "three": "^0.160.0"
   },

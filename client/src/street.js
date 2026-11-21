@@ -237,19 +237,21 @@ export function createCity(info) {
     const hs = LOOK.hscale[b0.k];
     const b = hs ? { ...b0, h: b0.h * hs } : b0;
     if (b.k === 'stall') { stalls.push(b); continue; }
-    if (b.k === 'platform') { const g = new THREE.BoxGeometry(b.w, b.h, b.d); g.translate(b.x, b.h / 2, b.z); roofs.push({ g, c: '#8a8a90' }); continue; }
+    if (b.k === 'platform') { const g = new THREE.BoxGeometry(b.w, b.h, b.d); if (b.ry) g.rotateY(b.ry); g.translate(b.x, b.h / 2, b.z); roofs.push({ g, c: b.venue === 'market' ? '#a8814f' : '#8a8a90' }); continue; }
     if (!FACADES[b.k]) continue;
     const g = boxGeo(b.w, b.h, b.d, 12, 6);
+    if (b.ry) g.rotateY(b.ry);
     g.translate(b.x, b.h / 2, b.z);
     (byKind[b.k] = byKind[b.k] || []).push(g);
     if (b.k === 'civic' && LOOK.landmarks.includes('domes') && Math.min(b.w, b.d) >= 12) domes.push(b);
     if (b.k === 'house') {
       const roof = gableGeo(b.w + 0.8, b.d + 0.8, 2.2);
-      roof.rotateY(r() > 0.5 ? 0 : Math.PI / 2 * 0);
+      if (b.ry) roof.rotateY(b.ry);
       roof.translate(b.x, b.h, b.z);
       gables.push(roof);
     } else {
       const rg = new THREE.BoxGeometry(b.w + 0.5, 0.5, b.d + 0.5);
+      if (b.ry) rg.rotateY(b.ry);
       rg.translate(b.x, b.h + 0.25, b.z);
       roofs.push({ g: rg, c: b.k === 'tower' || b.k === 'office' ? '#4a4e58' : b.k === 'warehouse' || b.k === 'bigbox' ? '#6a6e76' : '#5a4a44' });
     }
@@ -268,13 +270,38 @@ export function createCity(info) {
   for (const rf of roofs) (byColor[rf.c] = byColor[rf.c] || []).push(rf.g);
   for (const [c, list] of Object.entries(byColor)) { root.add(new THREE.Mesh(mergeGeometries(list), standard({ color: c }))); for (const g of list) g.dispose(); }
   if (gables.length) { const m = new THREE.Mesh(mergeGeometries(gables), standard({ color: LOOK.roof, side: THREE.DoubleSide })); root.add(m); for (const g of gables) g.dispose(); }
-  // Market stalls (small, coloured canopies).
+  // Market stalls: a counter with goods on it, four poles, a coloured canopy and a trader standing behind. All merged into one mesh (colour per vertex).
   if (stalls.length) {
-    const colors = ['#e74c3c', '#27ae60', '#f39c12', '#3a86ff', '#9b59b6'];
-    const tops = stalls.map((b, i) => { const g = new THREE.BoxGeometry(b.w, 0.15, b.d); g.translate(b.x, b.h, b.z); return g; });
-    const legs = stalls.map((b) => { const g = new THREE.BoxGeometry(b.w * 0.9, b.h * 0.9, b.d * 0.9); g.translate(b.x, (b.h * 0.9) / 2, b.z); return g; });
-    root.add(new THREE.Mesh(mergeGeometries(legs), standard({ color: '#8a6a45' })));
-    stalls.forEach((b, i) => { const t = new THREE.Mesh(tops[i], standard({ color: colors[i % colors.length] })); root.add(t); });
+    const parts = [];
+    const sr = rnd(4242);
+    const canopy = ['#e74c3c', '#27ae60', '#f39c12', '#3a86ff', '#9b59b6', '#e67e22', '#16a085'];
+    const goods = ['#d62828', '#f77f00', '#fcbf49', '#2a9d8f', '#8ac926', '#6a4c93', '#ffffff', '#c1121f'];
+    const skins = ['#3b2314', '#5a3820', '#7a4a2a', '#a0703a'];
+    const clothes = ['#e63946', '#2a9d8f', '#f4a261', '#264653', '#ffffff', '#ffb703', '#8338ec', '#3a86ff'];
+    const put = (g, hex, ry, ox, oy, oz, cx, cz) => {   // a part at local (ox, oy, oz) of a stall turned by ry
+      const c = new THREE.Color(hex), n = g.attributes.position.count, col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      g.translate(ox, oy, oz); g.rotateY(ry); g.translate(cx, 0, cz);
+      g.deleteAttribute('uv');
+      parts.push(g);
+    };
+    for (const b of stalls) {
+      const ry = b.ry || 0, hw = b.w / 2, hd = b.d / 2, cc = canopy[Math.floor(sr() * canopy.length)];
+      put(new THREE.BoxGeometry(b.w, 0.9, b.d * 0.55), '#8a6a45', ry, 0, 0.45, hd * 0.45, b.x, b.z);                 // counter at the front (+z)
+      for (let i = 0; i < 5; i++) put(new THREE.BoxGeometry(0.5, 0.3 + sr() * 0.2, 0.45), goods[Math.floor(sr() * goods.length)], ry, -hw * 0.8 + i * (b.w * 0.4), 1.05, hd * 0.45, b.x, b.z);
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) put(new THREE.BoxGeometry(0.1, b.h, 0.1), '#5a4632', ry, sx * (hw - 0.1), b.h / 2, sz * (hd - 0.1), b.x, b.z);
+      const top = new THREE.BoxGeometry(b.w + 0.5, 0.12, b.d + 0.5); top.rotateX(0.12);
+      put(top, cc, ry, 0, b.h, 0, b.x, b.z);
+      if (sr() < 0.85) {   // the trader
+        const sk = skins[Math.floor(sr() * skins.length)], tx = (sr() - 0.5) * b.w * 0.5;
+        put(new THREE.CylinderGeometry(0.24, 0.28, 1.0, 7), clothes[Math.floor(sr() * clothes.length)], ry, tx, 0.9, -hd * 0.35, b.x, b.z);
+        put(new THREE.SphereGeometry(0.19, 8, 6), sk, ry, tx, 1.62, -hd * 0.35, b.x, b.z);
+      }
+    }
+    const m = new THREE.Mesh(mergeGeometries(parts), standard({ vertexColors: true, roughness: 0.9 }));
+    root.add(m);
+    for (const g of parts) g.dispose();
   }
 
   // ---------- Landmarks: what makes each city look like itself ----------
@@ -370,36 +397,50 @@ export function createCity(info) {
     if (info.visit && !info.visit.includes(id)) continue;   // a visitor only sees the places they may enter (the server decides)
     const name = info.names[id];
     const accent = info.accents[id];
-    const south = d.f === 's'; // the building's front faces south (toward +z)
-    const sgn = south ? 1 : -1;
-    const fz = d.z - sgn * -0.6; // on the building front
+    const R = !!city.real, open = R && (id === 'market' || id === 'plaza');   // the open markets have an arch, not a door
+    const ry = typeof d.ry === 'number' ? d.ry : (d.f === 's' ? 0 : Math.PI);   // which way the front faces (the door point is 1 m out from the wall in the real cities)
+    const o = R ? -1.5 : 0;
+    const grp = new THREE.Group();
+    grp.position.set(d.x, 0, d.z);
+    grp.rotation.y = ry;
+    root.add(grp);
     const frameMat = standard({ color: accent, emissive: accent, emissiveIntensity: 0.15 });
     doorGlow.push(frameMat);
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(3, 3.6, 0.3), frameMat);
-    frame.position.set(d.x, 1.8, d.z + sgn * 0.5);
-    // The doorway is dark inside; the door leaf is hinged on one edge and swings open when someone comes near.
-    const hole = new THREE.Mesh(new THREE.BoxGeometry(2.3, 3.2, 0.3), standard({ color: '#08070b', roughness: 1 }));
-    hole.position.set(d.x, 1.6, d.z + sgn * 0.5);
-    const hinge = new THREE.Group();
-    hinge.position.set(d.x - 1.15, 0, d.z + sgn * 0.5 + sgn * 0.2);
-    const leaf = new THREE.Mesh(new THREE.BoxGeometry(2.3, 3.2, 0.12), standard({ color: '#2a2433', roughness: 0.35, metalness: 0.2 }));
-    leaf.position.set(1.15, 1.6, 0);
-    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.26), standard({ color: '#d8d8e0', metalness: 0.8, roughness: 0.3 }));
-    handle.position.set(2.0, 1.5, 0);
-    hinge.add(leaf, handle);
-    doorLeaves.push({ hinge, x: d.x, z: d.z, sgn, open: 0 });
-    const panel = hole;
-    const awn = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.2, 0.9), standard({ color: accent, transparent: true, opacity: 0.55 }));
-    awn.position.set(d.x, 3.9, d.z + sgn * 0.1);
     const tex = label(name, accent);
     disposables.push(tex);
     const signMat = new THREE.MeshBasicMaterial({ map: tex });
     disposables.push(signMat);
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(7, 1.75), signMat);
-    sign.position.set(d.x, 5.6, d.z + sgn * 0.7);
-    if (!south) sign.rotation.y = Math.PI;
-    root.add(frame, panel, hinge, awn, sign);
+    if (open) {
+      // A gateway over the entrance: two posts, a beam and the sign, with bunting. Nothing is closed: you just walk in.
+      const wide = id === 'market' ? 7 : 5;
+      for (const sx of [-1, 1]) { const p = new THREE.Mesh(new THREE.BoxGeometry(0.5, 5, 0.5), frameMat); p.position.set(sx * wide / 2, 2.5, 0); grp.add(p); }
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(wide + 1, 0.6, 0.6), frameMat); beam.position.set(0, 5.1, 0); grp.add(beam);
+      sign.position.set(0, 6.3, 0.05); sign.scale.setScalar(wide / 7 + 0.2); grp.add(sign);
+      const back = sign.clone(); back.rotation.y = Math.PI; back.position.z = -0.05; grp.add(back);
+      doorLeaves.push({ hinge: null, x: d.x, z: d.z, tx: d.x, tz: d.z, open: 0 });
+    } else {
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(3, 3.6, 0.3), frameMat);
+      frame.position.set(0, 1.8, 0.5 + o);
+      // The doorway is dark inside; the door leaf is hinged on one edge and swings open when someone comes near.
+      const hole = new THREE.Mesh(new THREE.BoxGeometry(2.3, 3.2, 0.3), standard({ color: '#08070b', roughness: 1 }));
+      hole.position.set(0, 1.6, 0.5 + o);
+      const hinge = new THREE.Group();
+      hinge.position.set(-1.15, 0, 0.7 + o);
+      const leaf = new THREE.Mesh(new THREE.BoxGeometry(2.3, 3.2, 0.12), standard({ color: '#2a2433', roughness: 0.35, metalness: 0.2 }));
+      leaf.position.set(1.15, 1.6, 0);
+      const handle = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.26), standard({ color: '#d8d8e0', metalness: 0.8, roughness: 0.3 }));
+      handle.position.set(2.0, 1.5, 0);
+      hinge.add(leaf, handle);
+      const out = R ? 0.2 : 1.2;
+      doorLeaves.push({ hinge, x: d.x, z: d.z, tx: d.x + Math.sin(ry) * out, tz: d.z + Math.cos(ry) * out, open: 0 });
+      const awn = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.2, 0.9), standard({ color: accent, transparent: true, opacity: 0.55 }));
+      awn.position.set(0, 3.9, R ? -0.55 : 0.1);
+      sign.position.set(0, 5.6, R ? -0.9 : 0.7);
+      grp.add(frame, hole, hinge, awn, sign);
+    }
     // A round icon floating above the sign, so you can tell what a place is from far away.
+    const iconY = open ? 8.9 : 8.4, iconZ = open ? 0 : (R ? -0.9 : 0.7);
     const cv = document.createElement('canvas');
     cv.width = cv.height = 128;
     const g = cv.getContext('2d');
@@ -426,7 +467,7 @@ export function createCity(info) {
     disposables.push(imat);
     const icon = new THREE.Sprite(imat);
     icon.scale.set(3, 3, 1);
-    icon.position.set(d.x, 8.4, d.z + sgn * 0.7);
+    icon.position.set(d.x + Math.sin(ry) * iconZ, iconY, d.z + Math.cos(ry) * iconZ);
     root.add(icon);
   }
   void doorGlow;
@@ -434,27 +475,32 @@ export function createCity(info) {
   // Your own house gets a marker so you can find it.
   if (Number.isInteger(info.myPlot) && city.plots[info.myPlot]) {
     const pl = city.plots[info.myPlot];
-    const sgn = pl.f === 's' ? 1 : -1;
+    const R = !!city.real;
+    const ry = R && typeof pl.ry === 'number' ? pl.ry : (pl.f === 's' ? 0 : Math.PI);
+    const g = new THREE.Group();
+    g.position.set(pl.door.x, 0, pl.door.z);
+    g.rotation.y = ry;
+    root.add(g);
     const flag = new THREE.Group();
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 4.5, 6), standard({ color: '#e8e8e8' }));
     pole.position.y = 2.25;
     const cloth = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.9), new THREE.MeshBasicMaterial({ color: '#8be0b0', side: THREE.DoubleSide }));
     cloth.position.set(0.8, 4.0, 0);
     flag.add(pole, cloth);
-    flag.position.set(pl.x + 3.6, 0, pl.z + sgn * 0.5);
-    root.add(flag);
+    // Old city: the plot's own x/z are the house; the door point is on its front. Real city: the door point is 1 m out from the wall.
+    flag.position.set(R ? 3.2 : pl.x - pl.door.x + 3.6, 0, R ? -0.5 : 0.5);
+    g.add(flag);
     const tex = label('Your home', '#8be0b0', 384, 96);
     disposables.push(tex);
     const signMat = new THREE.MeshBasicMaterial({ map: tex });
     disposables.push(signMat);
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 0.9), signMat);
-    sign.position.set(pl.door.x, 3.4, pl.door.z + (pl.f === 's' ? 0.3 : -0.3) * 0 + sgn * 0.9);
-    if (pl.f !== 's') sign.rotation.y = Math.PI;
-    root.add(sign);
+    sign.position.set(0, 3.4, R ? -0.85 : 0.9);
+    g.add(sign);
     // the door itself
     const dm = new THREE.Mesh(new THREE.BoxGeometry(1.6, 2.4, 0.2), standard({ color: '#8be0b0', emissive: '#8be0b0', emissiveIntensity: 0.2 }));
-    dm.position.set(pl.door.x, 1.2, pl.door.z + sgn * 0.3);
-    root.add(dm);
+    dm.position.set(0, 1.2, R ? -0.9 : 0.3);
+    g.add(dm);
   }
 
   // ---------- Railway ----------
@@ -966,9 +1012,11 @@ export function createCity(info) {
     // How close the nearest door is to a spot on the street (metres), for the reaching-hand pose.
     doorDistance(x, z) {
       let best = 99;
-      for (const d of doorLeaves) best = Math.min(best, Math.hypot(x - d.x, z - d.z - d.sgn * 0.5));
+      for (const d of doorLeaves) best = Math.min(best, Math.hypot(x - d.tx, z - d.tz));
       return best;
     },
+    // Places to sit outdoors: two seats on every bus-stop bench (the bench faces the road: +z).
+    seats() { const out = []; for (const s of city.busStops) { out.push({ x: s.x - 0.6, z: s.z, f: 0 }, { x: s.x + 0.6, z: s.z, f: 0 }); } return out; },
     setViewer(x, z) { viewerX = x; viewerZ = z; },
     update(dt) {
       if (realTiles) realTiles.update(viewerX, viewerZ);
@@ -980,9 +1028,9 @@ export function createCity(info) {
       // Doors: swing open (outward, up to ~100 degrees) when anyone is within a few metres, and close again when they leave.
       for (const d of doorLeaves) {
         let near = false;
-        for (const q of people) if (Math.hypot(q.x - d.x, q.z - d.z - d.sgn * 1.2) < 2.4) { near = true; break; }
+        for (const q of people) if (Math.hypot(q.x - d.tx, q.z - d.tz) < 2.4) { near = true; break; }
         d.open += ((near ? 1 : 0) - d.open) * (1 - Math.exp(-dt * (near ? 5 : 3)));
-        d.hinge.rotation.y = -d.sgn * d.open * 1.75;
+        if (d.hinge) d.hinge.rotation.y = -d.open * 1.75;
       }
       for (const w of waiters) { w.g.visible = (w.g.position.x - viewerX) ** 2 + (w.g.position.z - viewerZ) ** 2 < 85 * 85; if (w.g.visible) moveNpc(w.g, dt, 0); }
       const k = 1 - Math.exp(-dt * 14);

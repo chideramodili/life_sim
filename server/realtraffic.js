@@ -41,8 +41,25 @@ export function createRealTraffic(hub, seed = 7) {
     const q = c.pts[c.k]; let dx = q[0] - c.x, dz = q[1] - c.z; const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;
     c.fx = dx; c.fz = dz; c.ry = Math.atan2(dx, dz);
   }
+  // Parked cars: 40 beside the kerb of the main roads, nearest the middle of the city first. Placed once (same list for everyone) and solid.
+  const parked = [];
+  {
+    const rp = rng(seed + 991), segs = [];
+    for (const rd of hub.hubRoads || []) { if (rd.b || rd.w < 6) continue; for (let q = 0; q + 1 < rd.p.length; q++) { const a = rd.p[q], b = rd.p[q + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]); if (L >= 12) segs.push({ a, b, L, w: rd.w }); } }
+    segs.sort((m, n) => Math.hypot((m.a[0] + m.b[0]) / 2, (m.a[1] + m.b[1]) / 2) - Math.hypot((n.a[0] + n.b[0]) / 2, (n.a[1] + n.b[1]) / 2));
+    for (const sg of segs) {
+      if (parked.length >= 40) break;
+      if (rp() < 0.45) continue;
+      const dx = (sg.b[0] - sg.a[0]) / sg.L, dz = (sg.b[1] - sg.a[1]) / sg.L, t = 0.3 + rp() * 0.4, side = rp() < 0.5 ? 1 : -1, off = sg.w / 2 + 1.3;
+      const x = sg.a[0] + (sg.b[0] - sg.a[0]) * t - dz * side * off, z = sg.a[1] + (sg.b[1] - sg.a[1]) * t + dx * side * off;
+      if (hub.blocked(x, z) || hub.blocked(x + dx * 2.4, z + dz * 2.4) || hub.blocked(x - dx * 2.4, z - dz * 2.4)) continue;
+      if (parked.some((o) => Math.hypot(o.x - x, o.z - z) < 6)) continue;
+      parked.push({ x: Math.round(x * 10) / 10, z: Math.round(z * 10) / 10, ry: Math.round(Math.atan2(dx, dz) * 1000) / 1000, fx: dx, fz: dz, color: Math.floor(rp() * 9) });
+    }
+  }
+  const inParked = (x, z, pad) => { for (const k of parked) if (Math.abs(k.x - x) < 4 && Math.abs(k.z - z) < 4) { const ex = x - k.x, ez = z - k.z; if (Math.abs(ex * k.fx + ez * k.fz) <= HALF_LEN + pad && Math.abs(ex * -k.fz + ez * k.fx) <= HALF_WID + pad) return true; } return false; };
   const inBox = (c, x, z, pad) => { const dx = x - c.x, dz = z - c.z; return Math.abs(dx * c.fx + dz * c.fz) <= HALF_LEN + pad && Math.abs(dx * -c.fz + dz * c.fx) <= HALF_WID + pad; };
-  const blocked = (x, z, pad = 0.35) => { for (const c of cars) if (c.on && Math.abs(c.x - x) < 5 && Math.abs(c.z - z) < 5 && inBox(c, x, z, pad)) return true; return false; };
+  const blocked = (x, z, pad = 0.35) => { if (inParked(x, z, pad)) return true; for (const c of cars) if (c.on && Math.abs(c.x - x) < 5 && Math.abs(c.z - z) < 5 && inBox(c, x, z, pad)) return true; return false; };
 
   function step(dt, people, ph, drivers) {
     const watch = drivers && drivers.length ? people.concat(drivers) : people;
@@ -104,5 +121,5 @@ export function createRealTraffic(hub, seed = 7) {
     carAhead.last = who; return best;
   }
   const copCars = () => cars.filter((c) => c.cop && c.on);
-  return { cars, parked: [], bays: [], lanes: [], step, blocked, view, setLevel, carAhead, copCars, HIT_MIN };
+  return { cars, parked, bays: [], lanes: [], step, blocked, view, setLevel, carAhead, copCars, HIT_MIN };
 }

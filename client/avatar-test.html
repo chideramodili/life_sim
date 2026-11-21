@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Adulthood · Avatar test</title>
+  <style>
+    :root { --bg: #2b1b3d; --panel: rgba(20, 12, 34, 0.92); --text: #fff4e0; --muted: #c9b8dd; --on: #ffc857; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; overflow: hidden; }
+    #app { display: grid; grid-template-columns: 1fr minmax(300px, 40%); height: 100%; }
+    #stageWrap { position: relative; min-width: 0; }
+    #stage { width: 100%; height: 100%; display: block; touch-action: none; }
+    #status { position: absolute; left: 10px; bottom: 8px; font-size: 12px; background: rgba(0,0,0,.45); padding: 4px 10px; border-radius: 10px; max-width: calc(100% - 20px); }
+    #side { display: flex; flex-direction: column; background: var(--panel); min-height: 0; border-left: 1px solid rgba(255,255,255,.1); }
+    #tabs { display: flex; gap: 4px; padding: 8px; overflow-x: auto; flex: none; }
+    .tab { flex: none; border: 0; border-radius: 14px; padding: 7px 12px; background: rgba(255,255,255,.1); color: var(--text); font: inherit; font-size: 13px; font-weight: 700; }
+    .tab.on { background: var(--on); color: #2b1b3d; }
+    #panel { flex: 1; overflow-y: auto; padding: 4px 12px 8px; min-height: 0; }
+    .row { display: grid; grid-template-columns: 38% 1fr 40px; gap: 8px; align-items: center; font-size: 13px; margin: 6px 0; }
+    .row input { width: 100%; }
+    .val { color: var(--muted); font-size: 11px; text-align: right; }
+    .ttl { font-size: 12px; font-weight: 800; color: var(--muted); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .4px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+    .chip { border: 1px solid rgba(255,255,255,.18); border-radius: 12px; padding: 5px 9px; background: rgba(255,255,255,.07); color: var(--text); font: inherit; font-size: 12px; }
+    .chip.on { background: var(--on); color: #2b1b3d; border-color: var(--on); font-weight: 700; }
+    .sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid rgba(255,255,255,.7); }
+    select { width: 100%; padding: 7px; border-radius: 10px; font: inherit; margin: 6px 0; }
+    #bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; border-top: 1px solid rgba(255,255,255,.1); flex: none; align-items: center; }
+    #bar button { border: 0; border-radius: 14px; padding: 8px 12px; font: inherit; font-size: 13px; font-weight: 800; background: rgba(255,255,255,.14); color: var(--text); }
+    #save { background: var(--on) !important; color: #2b1b3d !important; }
+    #save:disabled { opacity: .45; }
+    #prem { font-size: 12px; padding: 6px 12px; background: rgba(255, 200, 87, .16); color: var(--on); flex: none; }
+    #json { width: 100%; height: 40px; font-size: 11px; box-sizing: border-box; }
+    .note { font-size: 12px; color: var(--muted); }
+    label.own { font-size: 12px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+    @media (orientation: portrait) { #app { grid-template-columns: 1fr; grid-template-rows: 45% 1fr; } #side { border-left: 0; } }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="stageWrap"><canvas id="stage"></canvas><div id="status">Loading…</div></div>
+    <div id="side">
+      <div id="tabs"></div>
+      <div id="prem" hidden></div>
+      <div id="panel"></div>
+      <div id="bar">
+        <button id="rand">🎲 Random</button><button id="reset">Reset</button><button id="save">Save</button>
+        <label class="own"><input type="checkbox" id="owned" /> Own premium (test)</label>
+        <details style="width:100%"><summary class="note">Settings text (copy / paste)</summary>
+          <textarea id="json" placeholder="Saved settings appear here. Paste settings and press Load to try them."></textarea>
+          <button id="load">Load</button></details>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/avatarTest.js"></script>
+</body>
+</html>
